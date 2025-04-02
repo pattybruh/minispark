@@ -8,8 +8,12 @@ int main(int argc, char* argv[]) {
     return -1;
   }
 
+  MS_Run();
+
   RDD* files = RDDFromFiles(argv + 1, argc - 1);
   int totalnumlines = count(map(files, GetLines));
+
+  MS_TearDown();
 
   printf("total number of lines in all files: %d\n", totalnumlines);
   return 0;
