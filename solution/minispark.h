@@ -1,6 +1,8 @@
 #ifndef __minispark_h__
 #define __minispark_h__
 
+#include <pthread.h>
+
 #define MAXDEPS (2)
 #define TIME_DIFF_MICROS(start, end) \
   (((end.tv_sec - start.tv_sec) * 1000000L) + ((end.tv_nsec - start.tv_nsec) / 1000L))
