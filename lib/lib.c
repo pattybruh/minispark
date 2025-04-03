@@ -63,7 +63,8 @@ void* SplitCols(void* arg) {
   
   ret = strtok_r(line, delim, &saveptr);
   while (ret != NULL) {
-    strncpy(row->cols[nc++], ret, MAXLEN);
+    strncpy(row->cols[nc], ret, MAXLEN);
+    row->cols[nc++][MAXLEN-1] = '\0';
     ret = strtok_r(NULL, delim, &saveptr);
   }
   row->ncols = nc;
