@@ -103,6 +103,13 @@ schedule threads to:
 - materialize partitions of an RDD in parallel
 - compute independent parts of the DAG in parallel
 
+What is "each element of its dependent partitions"?
+A RDD will have multiple partitions. Until here, it will match your 
+intuition from the diagrams. For each partitions, it will have multiple
+elements which can be get by calling the applied function until it reaches
+NULL. It is similar to the iterator behavior of modern programming 
+languages like `__next__()` method in python, or `Iterator` Trait in rust. 
+
 ## An example program: Linecount
 Here we consider an example program written for the minispark framework.
 ```
@@ -145,6 +152,36 @@ result. Here is a figure showing the DAG for linecount:
 
 ![SimpleExample](graphics/getline.png)
 
+In detail, `RDDFromFiles(argv + 1, argc - 1)` will construct a first 
+RDD having partitions with number of files passed to the argument. 
+Then `map(files, GetLines)` will construct a second RDD with `Getlines`
+as a function to be applied. Until now, no actual transformations are 
+applied. Only a blueprint of transformations is made. 
+
+After `count` is called, the transformations are applied. We use the 
+term **materialize** for applying the transformation. Then for each 
+partitions, `count` will iterate all the entries.
+
+Here are the steps of applying transformation. 
+1. The first RDD which is created by `RDDFromFiles` will call its 
+iterator. For file RDDs, iterator will only return `*fp` as described 
+in Code Overview below.
+2. The second RDD which is created by `map` will call its iterator. 
+Iterator will apply `fn` supplied for each elements of dependent RDD. 
+In this example, it will be the First RDD, and it will apply `fn` until 
+`fn` returns NULL. 
+    
+    * `map` transform will apply `fn` for each elements in dependent RDD
+    * In this case, the first RDD is file backed, so it will return `fp`
+    whenever it requires to iterate. 
+    * Therefore, this transform will call `Getline()` to `fp` until it 
+    returns NULL, which will be EOF.
+3. `count` will iterate all the partitions of the second RDD. For each 
+partitions, it will iterate all the elements in the partition. It will 
+count the number of iterations made, and return it as the result of
+`count`. 
+
+
 ## Thinking about parallelism
 RDDs form a directed acyclic graph (DAG) and data within each RDD is
 partitioned. Thus, there are two big opportunities for parallelism in
@@ -165,7 +202,9 @@ finish. This is likely to result in deadlock!
 
 ### More detail and a potential optimization
 The original Spark paper introduced the idea of "narrow" and "wide"
-dependencies between RDDs.
+dependencies between RDDs. This optimization is **not required** for the
+project and you can consider this as an extra optimization that can 
+be made for this project. 
 
 #### Narrow dependencies
 Partitions have a narrow dependency if they have only single
@@ -239,6 +278,11 @@ MiniSpark framework is oblivious to its contents. Minispark merely
 needs to ensure `ctx` is passed to the transform
 function. Constructors for all these are provided, but we do not
 provide code for applying the transformations.
+
+Commonly this `ctx`, which is the abbreviation of context, is used to 
+pass the required arguments to the function. Examples from the 
+applications folder might be useful to know what `ctx` is for. 
+
 - `map(RDD* rdd, Mapper fn)`: produce an RDD where `fn` is applied to
   each element in each partition of `rdd`.
 - `filter(RDD* rdd, Filter fn, void* ctx)`: produce an RDD where `fn`
@@ -264,6 +308,8 @@ provide code for applying the transformations.
   constructor which we use to read from files. The output RDD has one
   `FILE*` per partition, no dependencies, and an `identity` mapper
   which simply returns the `FILE*` whenever a partition is iterated.
+  There will not be any case that a RDD from `RDDFromFiles` will be 
+  a root RDD, which might iterate forever. 
 
 ### Aside: understanding Join and PartitionBy
 Although you won't have to implement joiners or partitioners, we
@@ -314,8 +360,9 @@ in `minispark.c` for each action:
 Every application or test program follows the same pattern. First,
 they define a DAG of RDDs. Then, they launch MiniSpark with
 `MS_Run`. With MiniSpark running, each application runs one or more
-actions on the DAG. If two actions are performed on the same DAG, RDDs
-in the DAG should only be materialized the first time. Finally,
+actions on the DAG. There will not be a scenario that performs two
+different transform to a single RDD, so you do not need to care 
+about the number of materialization made in a single RDD. Finally,
 applications stop execution and free resources with `MS_TearDown`.
 
 We won't ever reference the same RDD from multiple top-level RDDs in
@@ -364,7 +411,14 @@ higher performance with larger numbers of cores.
 
 One extremely useful abstraction for managing threads is called a
 _thread pool_. Thread pools are static allocations of threads which
-execute tasks in a _work queue_. Tasks are added to the queue by a
+execute tasks in a _work queue_. A thread pool consists of multiple
+worker threads that will live until `thread_pool_destroy` is called. 
+Worker threads will wait until the work is pushed to the work queue. 
+If they found the work can be done, one of the worker thread will 
+pop from the work queue and perform the work. After finishing work,
+it will wait again until it finds another work to be done. 
+
+Tasks are added to the queue by a
 dispatcher or controller thread (often, the main thread of
 execution). By using thread pools, we can avoid the high overhead of
 creating and joining threads each time work needs to be done. We can
@@ -378,12 +432,16 @@ this thread pool follows:
 - `thread_pool_destroy()`: `join` all the threads and deallocate any
   memory used by the pool.
 - `thread_pool_wait()`: returns when the work queue is empty and all
-  threads have finished their tasks.
+  threads have finished their tasks. You can use it to wait until all 
+  the tasks in the queue are finished. For example, you would not want
+  to `count` before RDD is fully materialized. 
 - `thread_pool_submit(Task* task)`: adds a task to the work queue.
 
 The thread pool also needs to maintain some global state accessible to
 all threads. Minimally, this can a thread-safe queue (similar to
-producer-consumer). You may find it useful to keep track of additional
+producer-consumer), which you've learned from the lecture. If you are
+not sure what it is, please refer conditional variable chapter of 
+OSTEP. You may find it useful to keep track of additional
 information like the amount of work in the queue, amount of work
 in-progress, etc.
 
@@ -473,11 +531,54 @@ Joiners -- _Join functions will always allocate new memory for the
 result of a Join, and MiniSpark should free all data in the
 materialized input partitions to the Join_.
 
+### Using a thread sanitizer
+You can use a thread sanitizer, which is provided by gcc by adding 
+`-fsanitize=thread` flag.
+
+Thread sanitizer is a tool like memory sanitizer we've used from 
+previous projects. Rather than memory bug detection, thread sanitizer 
+detects concurrecy bugs like race conditions and deadlocks. 
+
+Bugs like race conditions often do not cause direct error. Program 
+will not crash, and the race condition is often discovered after a lot
+of lines are execueted. It is really hard to find, so this tool might
+be useful. 
+
+Also, using `assert` macro will be helpful to narrow down the scope.
+The key of debugging is to narrow down the scope and making safe and
+unsafe region. 
+
+For general multithread debugging using gdb, please refer 
+`gdb_concurrent_debugging.md` in the repo. (Credit to Dhruv)
+
+### Notable Simplifications in the Project
+These simplifications are already written in the project writeup, and
+this is a summary of them. 
+* There will be only one `count` or `print` in a single test. 
+* A RDD will not be a dependency to multiple RDDs. In other word, a
+RDD will have only one parent RDD.
+* There are several simplifications for `join`. Please refer to it. 
+
+
+### FAQ
+* Q: In linecount example, `GetLine` does not return a set of lines.
+  * A: It is an iterator. 
+  Please refer to the linecount example explanation. 
+* Q: RDD from `RDDFromFiles` have only one element. How it is iterated?
+  * A: File backed RDD will return `fp` whenever it is iterated. 
+* More questions will be added whenever I find some frequently 
+asked questions.
+
 ### Grading
 You should write your implementation of MiniSpark in `minispark.c`. We
 will test your program (mostly) for correctness. A few tests will
 evaluate performance, and MiniSpark will also be evaluated for memory
-errors. 
+errors. Memory errors will be tested with only open testcases, so if you
+pass them, you don't need to worry about memory errors. 
+
+Also, hidden testcases will only consist of stressing with the large files
+and complex RDDs. You do not need to worry about the corner cases if you 
+pass all the open testcases. 
 
 
 ## Administrivia 
