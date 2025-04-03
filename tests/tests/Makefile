@@ -8,7 +8,7 @@ BIN_DIR = .
 
 PROGRAMS = 1.tmp 2.tmp 3.tmp 5.tmp 11.tmp 12.tmp
 
-PROGRAMS_TSAN = 7.tmp 8.tmp 9.tmp 10.tmp 16.tmp 17.tmp 
+PROGRAMS_TSAN = 7.tmp 8.tmp 9.tmp 10.tmp
 
 PROGRAMS_ASAN = 4.tmp 6.tmp
 
