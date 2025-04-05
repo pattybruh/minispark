@@ -2,3 +2,4 @@
 bin/
 *~
 *.log
+./tests/tests-out/
