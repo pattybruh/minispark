@@ -33,11 +33,8 @@ $(CHECKERS) : %.tmp : $(APP_DIR)/%.o $(OBJS)
 $(APP_DIR)/%.o: $(APP_DIR)/%.c
 	$(CC) $(CFLAGS) -c -o $@ $^
 
-$(SOL_DIR)/%.o: $(SOL_DIR)/%.c
-	$(CC) $(CFLAGS) -c -o $@ $^
-
 $(LIB_DIR)/%.o: $(LIB_DIR)/%.c
 	$(CC) $(CFLAGS) -c -o $@ $^
 
 clean:
-	rm -f *.tmp $(APP_DIR/*.o) $(SOL_DIR)/*.o $(LIB_DIR)/*.o
+	rm -f *.tmp $(APP_DIR/*.o) $(LIB_DIR)/*.o

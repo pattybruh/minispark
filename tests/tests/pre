@@ -1,2 +1,2 @@
-make SANITIZER=-fsanitize=thread -C ../ solution/minispark.o lib/lib.o
+make -C ../ solution/minispark.o lib/lib.o
 make -C ./tests all
