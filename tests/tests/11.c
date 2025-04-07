@@ -22,7 +22,7 @@ int main(int argc, char* argv[]) {
   // Get starting time
   char *filenames[1000];
   for (int i=0; i< 1000; i++) {
-    char *buffer = calloc(20,1);
+    char *buffer = calloc(30,1);
     sprintf(buffer, "./test_files/%d", i);
     filenames[i] = buffer;
   }

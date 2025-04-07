@@ -21,8 +21,20 @@ f2.close()
 import random
 random.seed(1234)
 
-for j in range(1024):
+k = [i for i in range(512*1024)]
+
+random.shuffle(k)
+for j in range(512):
     f1 = open(f'./test_files/largevals{j}.txt', 'w')
     for i in range(1024):
-        f1.write(f"{random.randrange(10000)}\t{random.randrange(10000)}\n")
+        key = k[j*1024+i]
+        f1.write(f"{key}\t{random.randrange(10000)}\n")
+    f1.close()
+
+random.shuffle(k)
+for j in range(512,1024):
+    f1 = open(f'./test_files/largevals{j}.txt', 'w')
+    for i in range(1024):
+        key = k[(j-512)*1024+i]
+        f1.write(f"{key}\t{random.randrange(10000)}\n")
     f1.close()
