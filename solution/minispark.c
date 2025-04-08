@@ -1,5 +1,61 @@
 #include "minispark.h"
 
+//LL functions
+List* list_init(){
+    List *temp = (List*)malloc(sizeof(List));
+    if(temp==NULL){
+        perror("list init malloc fail");
+        exit(1);
+    }
+    temp->head=NULL;
+    temp->size=0;
+    return temp;
+}
+void list_add_elem(List* l, FILE *fp){
+    ListNode* curr = malloc(sizeof(ListNode));
+    if(curr==NULL){
+        perror("list add elem malloc fail");
+        exit(1);
+    }
+    curr->file = fp;
+    //TODO: update cur val in future
+    //curr->val = 0;
+    ListNode* oldh = l->head;
+    curr->next = oldh;
+    l->head = curr;
+    l->size++;
+} 
+void list_free(List* l){
+    ListNode* front = l->head;
+    while(front){
+        ListNode* temp = front;
+        front = front->next;
+        //TODO: free stuff in the nodes (FILE*, ...)
+        free(temp);
+    }
+    free(l);
+}
+
+/*
+List *list_init(){
+    List *temp = (List *)malloc(sizeof(List));
+    if (temp == NULL){
+        perror("malloc");
+        exit(1);
+    }
+    temp->file = NULL;
+    temp->next = NULL;
+    return temp;
+}
+
+void list_add_elem(List **e, FILE *fp){
+    List *newhead = list_init();
+    newhead->file = fp;
+    newhead->next = *e;
+    *e = newhead;
+};
+*/
+
 // Working with metrics...
 // Recording the current time in a `struct timespec`:
 //    clock_gettime(CLOCK_MONOTONIC, &metric->created);
@@ -63,7 +119,7 @@ RDD *filter(RDD *dep, Filter fn, void *ctx)
 RDD *partitionBy(RDD *dep, Partitioner fn, int numpartitions, void *ctx)
 {
   RDD *rdd = create_rdd(1, PARTITIONBY, fn, dep);
-  rdd->partitions = list_init(numpartitions);
+  rdd->partitions = list_init();
   rdd->numpartitions = numpartitions;
   rdd->ctx = ctx;
   return rdd;
@@ -87,7 +143,7 @@ void *identity(void *arg)
 RDD *RDDFromFiles(char **filenames, int numfiles)
 {
   RDD *rdd = malloc(sizeof(RDD));
-  rdd->partitions = list_init(numfiles);
+  rdd->partitions = list_init();
 
   for (int i = 0; i < numfiles; i++)
   {

@@ -3,3 +3,5 @@ bin/
 *~
 *.log
 ./tests/tests-out/
+*.swp
+*.swo

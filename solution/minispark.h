@@ -1,6 +1,10 @@
 #ifndef __minispark_h__
 #define __minispark_h__
 
+#include <stdlib.h>
+#include <stdio.h>
+#include <time.h>
+#include <stdarg.h>
 #include <pthread.h>
 
 #define MAXDEPS (2)
@@ -12,6 +16,7 @@ struct List;
 
 typedef struct RDD RDD; // forward decl. of struct RDD
 typedef struct List List; // forward decl. of List.
+typedef struct ListNode ListNode;
 // Minimally, we assume "list_add_elem(List *l, void*)"
 
 // Different function pointer types used by minispark
@@ -36,10 +41,24 @@ struct RDD {
   List* partitions; // list of partitions
   
   RDD* dependencies[MAXDEPS];
+  int numpartitions;
   int numdependencies; // 0, 1, or 2
 
   // you may want extra data members here
 };
+
+struct ListNode{
+    ListNode* next;
+    FILE *file;
+    int val;
+};
+struct List{
+    ListNode* head;
+    int size;
+};
+List* list_init();
+void list_add_elem(List* l, FILE* fp);
+void list_free(List* l);
 
 typedef struct {
   struct timespec created;
