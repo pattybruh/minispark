@@ -352,10 +352,9 @@ MiniSpark should run an action (`count` or `print`) by materializing
 the RDD argument to the action in parallel and then running the action
 on the materialized RDD. We've provided a little bit of template code
 in `minispark.c` for each action:
-- `int count(RDD* rdd)`: materialize `rdd` with `MS_Run(rdd)` and
+- `int count(RDD* rdd)`: materialize `rdd` and
   return the number of elements in `rdd`.
-- `void print(RDD* rdd, Printer p)`: materialize `rdd` with
-  `MS_Run(rdd)` and print each element in `rdd` with `Printer p`.
+- `void print(RDD* rdd, Printer p)`: materialize `rdd` and print each element in `rdd` with `Printer p`.
   
 Every application or test program follows the same pattern. First,
 they define a DAG of RDDs. Then, they launch MiniSpark with
