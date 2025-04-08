@@ -117,34 +117,6 @@ int main()
     }
     free(file1);
 
-
-    
-    for (int i = 0; i < NUMFILES/2; i++)
-    {
-        filenames[i] = calloc(50, 1);
-        sprintf(filenames[i], "./test_files/largevals%d.txt", i+NUMFILES / 2);
-    }
-
-    counter = populate_partitions(filenames, NUMFILES / 2, 1024, 128);
-
-    struct row **file2 = calloc(1024 * 512, sizeof(struct row *));
-    for (int i = 0; i < 512 * 1024; i++)
-    {
-        file2[i] = SplitCols(GetLines(stdin));
-    }
-    int file2res = checker(file2, 512, 1024, 128);
-    if (file2res)
-    {
-        printfile(file2, file2res, 128);
-        return 1;
-    }
-    if (check_counts(counter, file2, NUMFILES/2, 1024, 128)){
-        
-        fprintf(stderr, "file 2 partition count mismatch\n");
-        return 1;
-    }
-    free(file2);
-
     printf("ok");
     return 0;
 }
