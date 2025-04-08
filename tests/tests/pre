@@ -1,2 +1,2 @@
-make -C ../ solution/minispark.o lib/lib.o
+make -C ../ solution/libminispark.a
 make -C ./tests all
