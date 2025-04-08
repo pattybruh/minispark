@@ -8,7 +8,9 @@ BIN_DIR = bin
 
 PROGRAMS = linecount cat grep grepcount sumjoin concurrency
 
-OBJS = $(SOL_DIR)/minispark.o $(LIB_DIR)/lib.o
+MS_OBJS = $(SOL_DIR)/minispark.o
+
+OBJS = $(MS_OBJS) $(LIB_DIR)/lib.o
 BINS = $(PROGRAMS:%=$(BIN_DIR)/%)
 
 all: $(BIN_DIR) $(BINS)
@@ -24,7 +26,7 @@ $(BIN_DIR)/%: $(APP_DIR)/%.o $(OBJS)
 $(APP_DIR)/%.o: $(APP_DIR)/%.c
 	$(CC) $(CFLAGS) -c -o $@ $^
 
-$(SOL_DIR)/libminispark.a : $(SOL_DIR)/minispark.o #Put .o files 
+$(SOL_DIR)/libminispark.a : $(MS_OBJS) #Put .o files 
 	ar rcs $@ $^
 
 $(SOL_DIR)/%.o: $(SOL_DIR)/%.c
