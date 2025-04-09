@@ -22,6 +22,7 @@ void* CountZero(void* arg) {
   }
   if (total_read)
     return cnt;
+  free(cnt);
   return NULL;
 }
 
@@ -37,7 +38,7 @@ int main() {
   
   char *filenames[1000];
   for (int i=0; i< 1000; i++) {
-    filenames[i] = calloc(30,1);
+    filenames[i] = calloc(100,1);
     sprintf(filenames[i], "./test_files/largevals%d.txt", i);
   }
 
@@ -48,5 +49,9 @@ int main() {
 
   MS_TearDown();
 
+  for (int i=0; i< 1000; i++) {
+    free(filenames[i]);
+  }
+  
   return 0;
 }

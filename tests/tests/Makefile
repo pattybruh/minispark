@@ -6,9 +6,11 @@ LIB_DIR = ../../lib
 SOL_DIR = ../../solution
 BIN_DIR = .
 
-PROGRAMS = 1.tmp 2.tmp 3.tmp 4.tmp 6.tmp 5.tmp 11.tmp 12.tmp 13.tmp 14.tmp 15.tmp 18.tmp 19.tmp 20.tmp 7.tmp 8.tmp 9.tmp 10.tmp 16.tmp
+PROGRAMS = 1.tmp 2.tmp 3.tmp 5.tmp 11.tmp 12.tmp 13.tmp 14.tmp 15.tmp 18.tmp 19.tmp 20.tmp 7.tmp 8.tmp 9.tmp 10.tmp 16.tmp
 
 PROGRAMS_TSAN = 17.tmp 
+
+PROGRAMS_ASAN = 4.tmp 6.tmp
 
 CHECKERS = 19checker.tmp 
 
@@ -17,7 +19,7 @@ OBJS = $(LIB_DIR)/lib.o
 
 MS = minispark
 
-all: $(PROGRAMS) $(PROGRAMS_TSAN) $(CHECKERS)
+all: $(PROGRAMS) $(PROGRAMS_TSAN) $(PROGRAMS_ASAN) $(CHECKERS)
 
 # compile all the bins
 $(PROGRAMS): %.tmp : $(APP_DIR)/%.o $(OBJS)

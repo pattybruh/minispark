@@ -19,10 +19,11 @@ int main(int argc, char* argv[]) {
   sctx.keynum = 0;
   sctx.target = 1;
   for (int i=0; i< NUMFILES; i++) {
-    char *buffer = calloc(20,1);
+    char *buffer = calloc(50,1);
     sprintf(buffer, "./test_files/%d", i);
     filenames[i] = buffer;
     files[0][i] = map(map(RDDFromFiles(&buffer, 1), GetLines), SplitCols);
+    free(buffer);
   }
 
   

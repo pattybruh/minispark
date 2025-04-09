@@ -9,7 +9,7 @@
 
 #define ROUNDS 5
 #define NUMFILES (1<<ROUNDS)
-#define FILENAMESIZE 50
+#define FILENAMESIZE 100
 
 int main(int argc, char* argv[]) {
 
@@ -39,7 +39,9 @@ int main(int argc, char* argv[]) {
   files[1] = partitionBy(map(map(RDDFromFiles((filenames + NUMFILES/2), NUMFILES/2), GetLines), SplitCols), ColumnHashPartitioner, 64, &pctx);
  
   print(join(files[0], files[1], SumJoin, &sctx), RowPrinter);
-  
+  for (int i=0; i< NUMFILES; i++) {
+    free(filenames[i]);
+     }
   MS_TearDown();
   return 0;
 }
