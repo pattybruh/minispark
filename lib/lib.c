@@ -8,6 +8,24 @@
 
 #define SLEEPNSEC 1E7 // 10 ms
 
+float numnops = 0;
+
+void measureNumNops(){
+  
+ struct timeval start, current;
+ long elapsed = 0;
+ gettimeofday(&start, NULL);
+
+ for (int i = 0; i < 1E8; i++) {
+    asm volatile ("nop\nnop\nnop\nnop\nnop\nnop\nnop\nnop\nnop\nnop\n");
+ }
+
+ gettimeofday(&current, NULL);
+    elapsed = (current.tv_sec - start.tv_sec) * 1000 +
+               (current.tv_usec - start.tv_usec) / 1000;
+  numnops = 1E9 * (1.0/elapsed);
+}
+
 int getNumThreads(){
   int count = 0;
   DIR *dir = opendir("/proc/self/task");
@@ -42,16 +60,9 @@ void* GetLines(void* arg) {
 }
 
 void SleepSec() {
- // Record the start time.
- struct timeval start, current;
- gettimeofday(&start, NULL);
-
- // Calculate elapsed time in milliseconds.
- long elapsed = 0;
- while (elapsed < 10) {
-     gettimeofday(&current, NULL);
-     elapsed = (current.tv_sec - start.tv_sec) * 1000 +
-               (current.tv_usec - start.tv_usec) / 1000;
+  if (numnops == 0) { printf("error on the tester!!!! \n"); assert(0);};
+  for (int i = 0; i < numnops*0.7; i++) {
+    asm volatile ("nop\nnop\nnop\nnop\nnop\nnop\nnop\nnop\nnop\nnop\n");
  }
 }
 
