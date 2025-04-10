@@ -6,6 +6,7 @@
 #include <time.h>
 #include <stdarg.h>
 #include <pthread.h>
+#include <sched.h>
 
 #define MAXDEPS (2)
 #define TIME_DIFF_MICROS(start, end) \
@@ -47,6 +48,8 @@ struct RDD {
   // you may want extra data members here
 };
 
+//TODO make list thread safe
+//minispark will work on partitions concurrently
 struct ListNode{
     ListNode* next;
     FILE *file;
@@ -59,6 +62,8 @@ struct List{
 List* list_init();
 void list_add_elem(List* l, FILE* fp);
 void list_free(List* l);
+
+
 
 typedef struct {
   struct timespec created;
@@ -73,6 +78,15 @@ typedef struct {
   int pnum;
   TaskMetric* metric;
 } Task;
+
+//////// threads ////////
+//array of all threads
+pthread_t *g_threads;
+//thread pool interface
+void thread_pool_init(int numthreads);
+void thread_pool_destroy();
+void thread_pool_wait();
+void thread_pool_submit(Task* task);
 
 //////// actions ////////
 

@@ -1,5 +1,40 @@
 #include "minispark.h"
 
+//task queue
+
+//thread pool implementation
+void *threadstart(void *arg){
+    return NULL;
+}
+void thread_pool_init(int numthreads){
+    if(numthreads < 1){
+        numthreads = 1;
+    }
+    //init global list of all threads
+    g_threads = malloc(sizeof(pthread_t)*numthreads);
+    if(!g_threads){
+        perror("pthread malloc");
+        exit(1);
+    }
+    for(int i=0; i<numthreads; i++){
+        int s = pthread_create(&g_threads[i], NULL, &threadstart, NULL);
+        if(s != 0){
+            perror("pthread_create");
+            exit(1);
+        }
+    }
+}
+
+void thread_pool_submit(Task* task){
+}
+
+void thread_pool_wait(){
+}
+
+void thread_pool_destroy(){
+}
+
+
 //LL functions
 List* list_init(){
     List *temp = (List*)malloc(sizeof(List));
@@ -166,11 +201,22 @@ void execute(RDD* rdd) {
 }
 
 void MS_Run() {
-  return;
+	cpu_set_t set;
+	CPU_ZERO(&set);
+	if(sched_getaffinity(0, sizeof(set), &set) == -1){
+		perror("sched_getaffinity");
+		exit(1);
+	}
+	thread_pool_init(CPU_COUNT(&set));//create pool w/ same # of threads as cores
+	return;
 }
 
 void MS_TearDown() {
-  return;
+	thread_pool_wait();
+	thread_pool_destroy();
+
+	//free all RDD's and lists
+	return;
 }
 
 int count(RDD *rdd) {
