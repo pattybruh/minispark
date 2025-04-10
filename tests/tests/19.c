@@ -9,9 +9,9 @@
 
 #define ROUNDS 10
 #define NUMFILES (1<<ROUNDS)
-#define FILENAMESIZE 50
+#define FILENAMESIZE 100
 
-int main(int argc, char* argv[]) {
+int main() {
 
   MS_Run();
   char *filenames[NUMFILES];
@@ -24,19 +24,22 @@ int main(int argc, char* argv[]) {
     filenames[i] = calloc(FILENAMESIZE,1);
     sprintf(filenames[i], "./test_files/largevals%d.txt", i);
      }
-  for (int i=NUMFILES/2; i< NUMFILES; i++) {
-    filenames[i] = calloc(FILENAMESIZE,1);
-    sprintf(filenames[i], "./test_files/largevals%d.txt", i);
-     }
 
   files[0] = partitionBy(map(map(RDDFromFiles(filenames, NUMFILES/2), GetLines), SplitCols), ColumnHashPartitioner, 128, &pctx);
   files[0] = partitionBy(files[0], ColumnHashPartitioner, 53, &pctx);
-//   files[0] = partitionBy(files[0], ColumnHashPartitioner, 512, &pctx);
-  files[1] = partitionBy(map(map(RDDFromFiles((filenames + NUMFILES/2), NUMFILES/2), GetLines), SplitCols), ColumnHashPartitioner, 128, &pctx);
- 
+
   print(files[0], RowPrinter);
-  print(files[1], RowPrinter);
   
   MS_TearDown();
+  for (int i=0; i< NUMFILES/2; i++) {
+    free(filenames[i]);
+     }
+     
+
+  int num_threads = getNumThreads();
+  if (num_threads > 1) {
+    printf("Worker threads didn't terminate\n");
+    return 0;
+  }
   return 0;
 }

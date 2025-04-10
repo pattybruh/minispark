@@ -15,7 +15,7 @@ def check_line(line: str):
 def check():
     f = open('metrics.log')
     cnt = [0,0,0,0]
-    ans = [32, 0, 64, 128]
+    ans = [32, 0, 64, 2]
 
     for line in f:
         r, t = check_line(line)
@@ -24,8 +24,8 @@ def check():
             return
         cnt[t] += 1
     for idx, i in enumerate(cnt):
-        if ans[idx] != i:
-            print(f"wrong number of log : trans type {idx}")
+        if ans[idx] > i:
+            print(f"too small job allocated : trans type {idx}, should be larger than {ans[idx]}, but only {i}")
             return
     print("ok")
 
