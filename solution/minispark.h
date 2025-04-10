@@ -1,3 +1,7 @@
+#ifndef _GNU_SOURCE
+#define _GNU_SOURCE
+#endif //_GNU_SOURCE
+
 #ifndef __minispark_h__
 #define __minispark_h__
 
@@ -91,7 +95,7 @@ typedef struct queue{
 } queue;
 
 void queue_init(queue* q);
-void queue_pushback(queue* q, Task* t);
+void queue_push(queue* q, Task* t);
 void queue_pop(queue* q, Task** t);
 
     
