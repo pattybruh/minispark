@@ -64,7 +64,6 @@ void list_add_elem(List* l, FILE* fp);
 void list_free(List* l);
 
 
-
 typedef struct {
   struct timespec created;
   struct timespec scheduled;
@@ -79,10 +78,24 @@ typedef struct {
   TaskMetric* metric;
 } Task;
 
+//task queue
+typedef struct qnode{
+    Task* t;
+    struct qnode* next;
+} qnode;
+
+typedef struct queue{
+    qnode* front;
+    qnode* back;
+    pthread_mutex_t frontlock, backlock;
+} queue;
+
+void queue_init(queue* q);
+void queue_pushback(queue* q, Task* t);
+void queue_pop(queue* q, Task** t);
+
+    
 //////// threads ////////
-//array of all threads
-pthread_t *g_threads;
-//thread pool interface
 void thread_pool_init(int numthreads);
 void thread_pool_destroy();
 void thread_pool_wait();

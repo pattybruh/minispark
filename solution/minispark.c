@@ -1,21 +1,82 @@
 #include "minispark.h"
 
+static pthread_t* g_threads = NULL;
+static int g_threadCount = 0;
+static queue* g_taskqueue = NULL;
+
 //task queue
+void queue_init(queue* q){
+    qnode* dummy= malloc(sizeof(qnode));
+    if(!dummy){
+        perror("queue init malloc");
+        exit(1);
+    }
+    dummy->t = NULL;
+    dummy->next = NULL;
+    q->front= dummy;
+    q->back = dummy;
+    pthread_mutex_init(&q->frontlock, NULL);
+    pthread_mutex_init(&q->backlock, NULL);
+}
+
+void queue_push(queue *q, Task *t){
+    qnode* temp = malloc(sizeof(qnode));
+    if(!temp){
+        perror("queue_push malloc");
+        exit(1);
+    }
+    Task* cpyTask = malloc(sizeof(Task));
+    if(!cpyTask){
+        perror("queue_push malloc");
+        exit(1);
+    }
+    *cpyTask = *t;
+    temp->t = cpyTask;
+    temp->next = NULL;
+    
+    // problem if queue size 1 has queue_pop and queue_push?
+    //solved w/ dummy head
+    pthread_mutex_lock(&q->backlock);
+    q->back->next = temp;
+    q->back = temp;
+    pthread_mutex_unlock(&q->backlock);
+}
+
+//caller must free returned val!
+void queue_pop(queue *q, Task** val){
+    // same as q.push problem
+    //solved w/ dummy head
+    pthread_mutex_lock(&q->frontlock);
+    qnode* dummy = q->front;
+    qnode* newh = dummy->next;
+    if(!newh){//empty q
+        pthread_mutex_unlock(&q->frontlock);
+        *val = NULL;
+    }
+    *val = newh->t;
+    q->front = newh;
+    pthread_mutex_unlock(&q->frontlock);
+    free(dummy);
+}
 
 //thread pool implementation
-void *threadstart(void *arg){
+void* threadstart(void *arg){
     return NULL;
 }
 void thread_pool_init(int numthreads){
     if(numthreads < 1){
         numthreads = 1;
     }
+    g_threadCount = numthreads;
     //init global list of all threads
     g_threads = malloc(sizeof(pthread_t)*numthreads);
-    if(!g_threads){
+    //init task queue
+    g_taskqueue = malloc(sizeof(queue));
+    if(!g_threads || !g_taskqueue){
         perror("pthread malloc");
         exit(1);
     }
+    queue_init(g_taskqueue);
     for(int i=0; i<numthreads; i++){
         int s = pthread_create(&g_threads[i], NULL, &threadstart, NULL);
         if(s != 0){
@@ -26,12 +87,29 @@ void thread_pool_init(int numthreads){
 }
 
 void thread_pool_submit(Task* task){
+    queue_push(g_taskqueue, task);
 }
 
 void thread_pool_wait(){
 }
 
 void thread_pool_destroy(){
+    for(int i=0; i<g_threadCount; i++){
+        pthread_join(g_threads[i], NULL);
+    }
+    g_threadCount = 0;
+    free(g_threads);
+    g_threads = NULL;
+
+    qnode* h = g_taskqueue->front;
+    while(h){
+        qnode* curr = h;
+        h=h->next;
+        free(curr->t);
+        free(curr);
+    }
+    free(g_taskqueue);
+    g_taskqueue = NULL;
 }
 
 
@@ -212,7 +290,6 @@ void MS_Run() {
 }
 
 void MS_TearDown() {
-	thread_pool_wait();
 	thread_pool_destroy();
 
 	//free all RDD's and lists
