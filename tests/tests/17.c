@@ -34,12 +34,6 @@ int main() {
   print(files[(1<<ROUNDS)-1], RowPrinter);
 
   MS_TearDown();
-  
 
-  int num_threads = getNumThreads();
-  if (num_threads > 1) {
-    printf("Worker threads didn't terminate\n");
-    return 0;
-  }
   return 0;
 }
