@@ -6,15 +6,12 @@
 
 void* CountZero(void* arg) {
   FILE *fp = (FILE*)arg;
-
-  char *line = NULL;
-  size_t size = 0;
-  
+ 
   char buffer[1000];
   int total_read = 0;
   int *cnt = calloc(1, sizeof(int));
   int tmp;
-  while (tmp = fread(buffer, 1, 999, fp)){
+  while ((tmp = fread(buffer, 1, 999, fp))){
     for (int i =0; i< tmp; i++){
       if (buffer[i] == '0') *cnt+=1;
     }
@@ -27,7 +24,7 @@ void* CountZero(void* arg) {
 }
 
 void IntPrinter(void* arg) {
-  int* v = (char*)arg;
+  int* v = (int *)arg;
   printf("%d\n", *v);
 }
 
@@ -53,5 +50,11 @@ int main() {
     free(filenames[i]);
   }
   
+
+  int num_threads = getNumThreads();
+  if (num_threads > 1) {
+    printf("Worker threads didn't terminate\n");
+    return 0;
+  }
   return 0;
 }

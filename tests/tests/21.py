@@ -15,7 +15,7 @@ def check_line(line: str):
 def check():
     f = open('metrics.log')
     cnt = [0,0,0,0]
-    ans = [32, 0, 64, 32]
+    ans = [32, 0, 64, 2]
 
     for line in f:
         r, t = check_line(line)

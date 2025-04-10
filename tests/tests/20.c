@@ -11,7 +11,7 @@
 #define NUMFILES (1<<ROUNDS)
 #define FILENAMESIZE 100
 
-int main(int argc, char* argv[]) {
+int main() {
 
   char *filenames[NUMFILES];
   RDD* files[2];
@@ -43,5 +43,12 @@ int main(int argc, char* argv[]) {
     free(filenames[i]);
      }
   MS_TearDown();
+  
+
+  int num_threads = getNumThreads();
+  if (num_threads > 1) {
+    printf("Worker threads didn't terminate\n");
+    return 0;
+  }
   return 0;
 }

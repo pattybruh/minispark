@@ -10,11 +10,10 @@
 #define ROUNDS 9
 #define NUMFILES (1<<ROUNDS)
 
-int main(int argc, char* argv[]) {
+int main() {
 
 
   MS_Run();
-  char *filenames[NUMFILES];
   RDD* files[NUMFILES];
   struct sumjoin_ctx sctx;
   sctx.keynum = 0;
@@ -35,5 +34,12 @@ int main(int argc, char* argv[]) {
   print(files[(1<<ROUNDS)-1], RowPrinter);
 
   MS_TearDown();
+  
+
+  int num_threads = getNumThreads();
+  if (num_threads > 1) {
+    printf("Worker threads didn't terminate\n");
+    return 0;
+  }
   return 0;
 }

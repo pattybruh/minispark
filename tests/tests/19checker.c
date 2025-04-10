@@ -31,10 +31,10 @@ void printfile(struct row **file, int wrongline, int npartitions)
     struct colpart_ctx pctx;
     pctx.keynum = 0;
     printf("wrong partition order, prev partition smaller than cur or having too large partition number\n");
-    printf("prev line : (partition %d)\n", ColumnHashPartitioner(file[wrongline - 1], npartitions, &pctx));
+    printf("prev line : (partition %ld)\n", ColumnHashPartitioner(file[wrongline - 1], npartitions, &pctx));
     RowPrinter(file[wrongline - 1]);
 
-    printf("cur line : (partition %d)\n", ColumnHashPartitioner(file[wrongline], npartitions, &pctx));
+    printf("cur line : (partition %ld)\n", ColumnHashPartitioner(file[wrongline], npartitions, &pctx));
     RowPrinter(file[wrongline]);
 }
 
@@ -65,7 +65,6 @@ int check_counts(int *refcnt, struct row **file, int filesize, int lineperfile, 
     pctx.keynum = 0;
     for (int i = 0; i < filesize * lineperfile; i++)
     {
-        struct row *row = file[i];
         int hash = ColumnHashPartitioner(file[i], npartitions, &pctx);
         curcnt[hash]++;
     }
@@ -89,8 +88,6 @@ int main()
 
     char *filenames[NUMFILES];
 
-    struct colpart_ctx pctx;
-    pctx.keynum = 0;
 
     for (int i = 0; i < NUMFILES / 2; i++)
     {

@@ -11,7 +11,7 @@
 #define NUMFILES (1<<ROUNDS)
 #define FILENAMESIZE 100
 
-int main(int argc, char* argv[]) {
+int main() {
 
   MS_Run();
   char *filenames[NUMFILES];
@@ -34,5 +34,12 @@ int main(int argc, char* argv[]) {
   for (int i=0; i< NUMFILES/2; i++) {
     free(filenames[i]);
      }
+     
+
+  int num_threads = getNumThreads();
+  if (num_threads > 1) {
+    printf("Worker threads didn't terminate\n");
+    return 0;
+  }
   return 0;
 }

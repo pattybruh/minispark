@@ -1,6 +1,8 @@
 #define MAXCOLS (10)
 #define MAXLEN (32)
+#include <dirent.h>
 
+int getNumThreads();
 // we statically allocate the number and length of columns to simplify
 // memory management.
 struct row {

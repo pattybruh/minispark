@@ -6,11 +6,12 @@
 #include <stdarg.h>
 #include "lib.h"
 #include "minispark.h"
+#include <dirent.h>
 
 #define ROUNDS 6
 #define NUMFILES (1<<ROUNDS)
 
-int main(int argc, char* argv[]) {
+int main() {
   struct timeval start, end;
 
   cpu_set_t set;
@@ -26,7 +27,6 @@ int main(int argc, char* argv[]) {
 
 
   MS_Run();
-  char *filenames[NUMFILES];
   RDD* files[NUMFILES];
   struct sumjoin_ctx sctx;
   sctx.keynum = 0;
@@ -54,12 +54,20 @@ int main(int argc, char* argv[]) {
   long seconds = end.tv_sec - start.tv_sec;
   long microseconds = end.tv_usec - start.tv_usec;
   double elapsed = seconds + microseconds * 1e-6;
+  
 
+  int num_threads = getNumThreads();
+  if (num_threads > 1) {
+    printf("Worker threads didn't terminate\n");
+    return 0;
+  }
 
-  double predict = (10 / cpu_cnt)+1;
+  double predict = (2*10.0 / cpu_cnt)+1;
   if (elapsed < predict)
     printf("ok");
-  else
+    else if (elapsed < predict -1.5) {
+      printf("Too fast! Are you evaluating before count()?");
+    } else
     printf("Too slow. elapsed %.2f predict %.2f\n", elapsed, predict);
 
   return 0;
