@@ -51,7 +51,7 @@ int main() {
 
 
   // Check if it scales. 
-  double predict = (3* 10.0 / cpu_cnt)+1;
+  double predict = (3* 10.0 / (cpu_cnt-1))+1;
   if (elapsed < predict)
     printf("ok");
     else if (elapsed < predict -1.5) {
