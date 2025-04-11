@@ -116,7 +116,6 @@ void thread_pool_destroy(){
 
 
 //LL functions
-// 1=2D list, 0=file backed
 List* list_init(int t){
     List *temp = (List*)malloc(sizeof(List));
     if(temp==NULL){
@@ -124,9 +123,11 @@ List* list_init(int t){
         exit(1);
     }
     temp->head=NULL;
-    pthread_mutex_init(&temp->guard, NULL);
     temp->size=0;
     temp->isList = t;
+    if(!t){//if its 2d list, dont need a lock
+        pthread_mutex_init(&temp->guard, NULL);
+    }
     return temp;
 }
 void list_add_elem(List* l, void* e){
@@ -136,12 +137,19 @@ void list_add_elem(List* l, void* e){
         exit(1);
     }
     curr->data = e;
-    
-    pthread_mutex_lock(&l->guard);
+
+    //only need locks on 1d lists
+    //parition list is always created by main thread (no concurrency)
+    //allows multiple threads to work on same List but differetn partitions
+    if(!l->isList){
+        pthread_mutex_lock(&l->guard);
+    }
     curr->next = l->head;
     l->head = curr;
     l->size++;
-    pthread_mutex_unlock(&l->guard);
+    if(!l->isList){
+        pthread_mutex_unlock(&l->guard);
+    }
 } 
 void list_free(List* l){
     int b = l->isList;
@@ -236,19 +244,42 @@ RDD *create_rdd(int numdeps, Transform t, void *fn, ...)
   rdd->numdependencies = numdeps;
   rdd->trans = t;
   rdd->fn = fn;
-  rdd->partitions = NULL;
+  //rdd->partitions = list_init(1);
   return rdd;
 }
 
 /* RDD constructors */
 RDD *map(RDD *dep, Mapper fn)
 {
-  return create_rdd(1, MAP, fn, dep);
+  RDD* rdd = create_rdd(1, MAP, fn, dep);
+  rdd->partitions = list_init(1);
+  for(int i=0; i<rdd->numpartitions; i++){
+      List* temp = list_init(0);
+      list_add_elem(rdd->partitions, temp);
+  }
+
+  rdd->pdep = malloc(sizeof(int)*rdd->numpartitions);
+  for(int i=0; i<rdd->numpartitions; i++){
+      rdd->pdep[i] = 1;
+  }
+  return rdd;
 }
 
 RDD *filter(RDD *dep, Filter fn, void *ctx)
 {
   RDD *rdd = create_rdd(1, FILTER, fn, dep);
+
+  rdd->partitions = list_init(1);
+  for(int i=0; i<rdd->numpartitions; i++){
+      List* temp = list_init(0);
+      list_add_elem(rdd->partitions, temp);
+  }
+
+  rdd->pdep = malloc(sizeof(int)*rdd->numpartitions);
+  for(int i=0; i<rdd->numpartitions; i++){
+      rdd->pdep[i] = 1;
+  }
+  rdd->partitions = list_init(1);
   rdd->ctx = ctx;
   return rdd;
 }
@@ -256,8 +287,19 @@ RDD *filter(RDD *dep, Filter fn, void *ctx)
 RDD *partitionBy(RDD *dep, Partitioner fn, int numpartitions, void *ctx)
 {
   RDD *rdd = create_rdd(1, PARTITIONBY, fn, dep);
-  rdd->partitions = list_init(1);//TODO 1 or 0 not sure yet
   rdd->numpartitions = numpartitions;
+
+  rdd->partitions = list_init(1);
+  for(int i=0; i<rdd->numpartitions; i++){
+      List* temp = list_init(0);
+      list_add_elem(rdd->partitions, temp);
+  }
+
+  rdd->pdep = malloc(sizeof(int)*rdd->numpartitions);
+  for(int i=0; i<rdd->numpartitions; i++){
+      rdd->pdep[i] = rdd->numdependencies;
+  }
+
   rdd->ctx = ctx;
   return rdd;
 }
@@ -265,6 +307,11 @@ RDD *partitionBy(RDD *dep, Partitioner fn, int numpartitions, void *ctx)
 RDD *join(RDD *dep1, RDD *dep2, Joiner fn, void *ctx)
 {
   RDD *rdd = create_rdd(2, JOIN, fn, dep1, dep2);
+    /*
+  for(int i=0; i<maxpartitions; i++){
+      list_add_elem(rdd->partitions, NULL);
+  }
+  rdd->pdep = malloc(sizeof(int)**/
   rdd->ctx = ctx;
   return rdd;
 }
@@ -293,15 +340,30 @@ RDD *RDDFromFiles(char **filenames, int numfiles)
   }
 
   rdd->numdependencies = 0;
-  rdd->trans = MAP;
+  //rdd->trans = MAP;
+  rdd->trans = FILE_BACKED;
   rdd->fn = (void *)identity;
 
   rdd->numpartitions = rdd->partitions->size;
+  rdd->pdep = NULL;
   return rdd;
 }
 
 void execute(RDD* rdd) {
-
+    //TODO: add checks for pdep[pnum] before submitting a partition to q
+    if(rdd->numdependencies == 0){//base
+        for(int i=0; i<rdd->numpartitions; i++){
+            Task* t = malloc(sizeof(Task));
+            t->rdd = rdd;
+            t->pnum = i;
+            t->metric = NULL; //TODO
+            thread_pool_submit(t);
+            free(t);
+        }
+    }
+    for(int i=0; i<rdd->numdependencies; i++){
+        execute(rdd->dependencies[i]);
+    }
     return;
 }
 
@@ -319,7 +381,7 @@ void MS_Run() {
 void MS_TearDown() {
 	thread_pool_destroy();
 
-	//free all RDD's and lists
+	//TODO: free all RDD's and lists
 	return;
 }
 

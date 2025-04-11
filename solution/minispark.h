@@ -50,6 +50,7 @@ struct RDD {
   int numdependencies; // 0, 1, or 2
 
   // you may want extra data members here
+  int* pdep;
 };
 
 //TODO make list thread safe
@@ -64,6 +65,7 @@ struct List{
     int size;
     int isList;
 };
+//1=2d list, 0=1d list
 List* list_init(int t);
 //add element to partition list
 void list_add_elem(List* l, void* e);
