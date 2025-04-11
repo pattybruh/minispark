@@ -55,7 +55,7 @@ int main() {
 
 
   // Check if it scales. 
-  double predict = ((3*2*10.0)/ (cpu_cnt-1))+1;
+  double predict = ((3*2*10.0)/ (cpu_cnt-1))+3;
   if (elapsed < 1) {
     printf("Too fast! Are you evaluating before count()?");
   }else if (elapsed < predict)

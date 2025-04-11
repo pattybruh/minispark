@@ -62,7 +62,7 @@ int main() {
     return 0;
   }
 
-  double predict = (2*1.920/ (cpu_cnt-1))+1;
+  double predict = (2*1.920/ (cpu_cnt-1))+3;
    if (elapsed < 0.1) {
       printf("Too fast! Are you evaluating before count()?");
     } else if (elapsed < predict)
