@@ -25,12 +25,8 @@ void queue_init(queue* q){
 
 void queue_push(queue *q, Task *t){
     qnode* temp = malloc(sizeof(qnode));
-    if(!temp){
-        perror("queue_push malloc");
-        exit(1);
-    }
     Task* cpyTask = malloc(sizeof(Task));
-    if(!cpyTask){
+    if(!temp || !cpyTask){
         perror("queue_push malloc");
         exit(1);
     }
@@ -56,6 +52,7 @@ void queue_pop(queue *q, Task** val){
     if(!newh){//empty q
         pthread_mutex_unlock(&q->frontlock);
         *val = NULL;
+        return;
     }
     *val = newh->t;
     q->front = newh;
@@ -119,60 +116,78 @@ void thread_pool_destroy(){
 
 
 //LL functions
-List* list_init(){
+// 1=2D list, 0=file backed
+List* list_init(int t){
     List *temp = (List*)malloc(sizeof(List));
     if(temp==NULL){
         perror("list init malloc fail");
         exit(1);
     }
     temp->head=NULL;
+    pthread_mutex_init(&temp->guard, NULL);
     temp->size=0;
+    temp->isList = t;
     return temp;
 }
-void list_add_elem(List* l, FILE *fp){
+void list_add_elem(List* l, void* e){
     ListNode* curr = malloc(sizeof(ListNode));
     if(curr==NULL){
         perror("list add elem malloc fail");
         exit(1);
     }
-    curr->file = fp;
-    //TODO: update cur val in future
-    //curr->val = 0;
-    ListNode* oldh = l->head;
-    curr->next = oldh;
+    curr->data = e;
+    
+    pthread_mutex_lock(&l->guard);
+    curr->next = l->head;
     l->head = curr;
     l->size++;
+    pthread_mutex_unlock(&l->guard);
 } 
 void list_free(List* l){
+    int b = l->isList;
     ListNode* front = l->head;
-    while(front){
-        ListNode* temp = front;
-        front = front->next;
-        //TODO: free stuff in the nodes (FILE*, ...)
-        free(temp);
+    if(b){
+        while(front){
+            ListNode* temp = front;
+            front = front->next;
+            list_free((List*)temp->data);
+            
+            //free(temp); //double free
+        }
     }
-    free(l);
+    else{
+        while(front){
+            ListNode* temp = front;
+            front = front->next;
+            //TODO: might need separate func listfree2d listfree1d
+            //b/c need to free either char* or fclose FILE*
+            free(temp);
+        }
+        free(l);
+    }
+}
+void* list_get(List* l, int idx){
+    if(idx<0 || idx>= l->size) return NULL;
+    ListNode* curr = l->head;
+    for(int i=0; i<idx; i++){
+        curr=curr->next;
+    }
+    return curr->data;
 }
 
-/*
-List *list_init(){
-    List *temp = (List *)malloc(sizeof(List));
-    if (temp == NULL){
-        perror("malloc");
-        exit(1);
-    }
-    temp->file = NULL;
-    temp->next = NULL;
-    return temp;
+void listit_seek_to_start(List* l, ListIt* it){
+    it->curr = l->head;
 }
 
-void list_add_elem(List **e, FILE *fp){
-    List *newhead = list_init();
-    newhead->file = fp;
-    newhead->next = *e;
-    *e = newhead;
-};
-*/
+ListNode* listit_next(List* l, ListIt* it){
+    ListNode* res = it->curr;
+    if(!res){
+        return res;
+    }
+    //advance iterator if not last
+    it->curr = it->curr->next;
+    return res;
+}
 
 // Working with metrics...
 // Recording the current time in a `struct timespec`:
@@ -241,7 +256,7 @@ RDD *filter(RDD *dep, Filter fn, void *ctx)
 RDD *partitionBy(RDD *dep, Partitioner fn, int numpartitions, void *ctx)
 {
   RDD *rdd = create_rdd(1, PARTITIONBY, fn, dep);
-  rdd->partitions = list_init();
+  rdd->partitions = list_init(1);//TODO 1 or 0 not sure yet
   rdd->numpartitions = numpartitions;
   rdd->ctx = ctx;
   return rdd;
@@ -265,7 +280,7 @@ void *identity(void *arg)
 RDD *RDDFromFiles(char **filenames, int numfiles)
 {
   RDD *rdd = malloc(sizeof(RDD));
-  rdd->partitions = list_init();
+  rdd->partitions = list_init(0);//file backed, t=0
 
   for (int i = 0; i < numfiles; i++)
   {

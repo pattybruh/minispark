@@ -55,21 +55,26 @@ struct RDD {
 //TODO make list thread safe
 //minispark will work on partitions concurrently
 struct ListNode{
-    ListNode* next;
-    FILE *file;
-    int val;
+    ListNode* next; //partition list
+    void* data;     //generic (can be List* for data partitions or char* for data element)
 };
 struct List{
     ListNode* head;
+    pthread_mutex_t guard;
     int size;
+    int isList;
 };
-List* list_init();
-void list_add_elem(List* l, FILE* fp);
+List* list_init(int t);
+//add element to partition list
+void list_add_elem(List* l, void* e);
+//add DATA element to a partition
+//TODO
+void list_append();
 void list_free(List* l);
 
 //list iterator
 typedef struct{
-
+    ListNode* curr;
 } ListIt;
 void listit_seek_to_start(List* l, ListIt* it);
 ListNode* listit_next(List* l, ListIt* it);
