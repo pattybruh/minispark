@@ -4,6 +4,10 @@ static pthread_t* g_threads = NULL;
 static int g_threadCount = 0;
 static queue* g_taskqueue = NULL;
 
+static pthread_cond_t qempty = PTHREAD_COND_INITIALIZER;
+static pthread_cond_t qfill = PTHREAD_COND_INITIALIZER;
+static pthread_mutex_t qmutex = PTHREAD_MUTEX_INITIALIZER;
+
 //task queue
 void queue_init(queue* q){
     qnode* dummy= malloc(sizeof(qnode));
@@ -61,6 +65,7 @@ void queue_pop(queue *q, Task** val){
 
 //thread pool implementation
 void* threadstart(void *arg){
+    
     return NULL;
 }
 void thread_pool_init(int numthreads){
@@ -78,7 +83,7 @@ void thread_pool_init(int numthreads){
     }
     queue_init(g_taskqueue);
     for(int i=0; i<numthreads; i++){
-        int s = pthread_create(&g_threads[i], NULL, &threadstart, NULL);
+        int s = pthread_create(&g_threads[i], NULL, threadstart, NULL);
         if(s != 0){
             perror("pthread_create");
             exit(1);
@@ -189,6 +194,8 @@ int max(int a, int b)
 }
 
 RDD *create_rdd(int numdeps, Transform t, void *fn, ...)
+    //map(RDD* files, GetLines) => create_rdd(1, MA, GetLines, RDD* files)
+    //numdeps=1, Transform=MAP, fn=GetLines, dep=files
 {
   RDD *rdd = malloc(sizeof(RDD));
   if (rdd == NULL)
@@ -208,6 +215,8 @@ RDD *create_rdd(int numdeps, Transform t, void *fn, ...)
     maxpartitions = max(maxpartitions, dep->partitions->size);
   }
   va_end(args);
+  //TODO: might not be correct use
+  rdd->numpartitions = maxpartitions;
 
   rdd->numdependencies = numdeps;
   rdd->trans = t;
@@ -271,11 +280,14 @@ RDD *RDDFromFiles(char **filenames, int numfiles)
   rdd->numdependencies = 0;
   rdd->trans = MAP;
   rdd->fn = (void *)identity;
+
+  rdd->numpartitions = rdd->partitions->size;
   return rdd;
 }
 
 void execute(RDD* rdd) {
-  return;
+
+    return;
 }
 
 void MS_Run() {

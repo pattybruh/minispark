@@ -67,6 +67,13 @@ List* list_init();
 void list_add_elem(List* l, FILE* fp);
 void list_free(List* l);
 
+//list iterator
+typedef struct{
+
+} ListIt;
+void listit_seek_to_start(List* l, ListIt* it);
+ListNode* listit_next(List* l, ListIt* it);
+
 
 typedef struct {
   struct timespec created;
