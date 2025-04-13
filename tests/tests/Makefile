@@ -12,22 +12,21 @@ PROGRAMS_TSAN = 17.tmp
 
 CHECKERS = 19checker.tmp 
 
+SOLUTION_SRCS := $(wildcard $(SOL_DIR)/*.c)
+SOLUTION_OBJS := $(SOLUTION_SRCS:%.c=%.o)
 OBJS = $(LIB_DIR)/lib.o
-
-
-MS = minispark
 
 all: $(PROGRAMS) $(PROGRAMS_TSAN) $(CHECKERS)
 
 # compile all the bins
-$(PROGRAMS): %.tmp : $(APP_DIR)/%.o $(OBJS)
-	$(CC) $(CFLAGS) -o $@ $^ -L$(SOL_DIR) -l$(MS)
+$(PROGRAMS): %.tmp : $(APP_DIR)/%.o $(SOLUTION_OBJS) $(LIB_DIR)/lib.o
+	$(CC) $(CFLAGS) -o $@ $^ 
 
-$(PROGRAMS_TSAN): %.tmp : $(APP_DIR)/%.o $(OBJS)
-	$(CC) $(CFLAGS) -fsanitize=thread  -o $@ $^ -L$(SOL_DIR) -l$(MS)
+$(PROGRAMS_TSAN): %.tmp : $(APP_DIR)/%.o $(SOLUTION_OBJS) $(LIB_DIR)/lib.o
+	$(CC) $(CFLAGS) -fsanitize=thread  -o $@ $^
 
-$(CHECKERS) : %.tmp : $(APP_DIR)/%.o $(OBJS)
-	$(CC) $(CFLAGS) -o $@ $^ -L$(SOL_DIR) -l$(MS)
+$(CHECKERS) : %.tmp : $(APP_DIR)/%.o $(LIB_DIR)/lib.o
+	$(CC) $(CFLAGS) -o $@ $^ 
 
 # compile all the objects
 $(APP_DIR)/%.o: $(APP_DIR)/%.c
