@@ -50,7 +50,10 @@ struct RDD {
   int numdependencies; // 0, 1, or 2
 
   // you may want extra data members here
+  //size of these 2 should be nunpartitions
+  pthread_mutex_t* pdeplock;//NULL IF TRANSFORMATION IS NOT PARTITION! (b/c maybe pdep[i] > 1)
   int* pdep;
+  RDD* child;
 };
 
 //TODO make list thread safe
@@ -65,7 +68,7 @@ struct List{
     int size;
     int isList;
 };
-//1=2d list, 0=1d list
+//1=no locks list, 0=locks
 List* list_init(int t);
 //add element to partition list
 void list_add_elem(List* l, void* e);
@@ -106,6 +109,7 @@ typedef struct queue{
     qnode* front;
     qnode* back;
     pthread_mutex_t frontlock, backlock;
+    int size;
 } queue;
 
 void queue_init(queue* q);

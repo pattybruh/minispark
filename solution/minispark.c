@@ -4,7 +4,7 @@ static pthread_t* g_threads = NULL;
 static int g_threadCount = 0;
 static queue* g_taskqueue = NULL;
 
-static pthread_cond_t qempty = PTHREAD_COND_INITIALIZER;
+//static pthread_cond_t qempty = PTHREAD_COND_INITIALIZER;
 static pthread_cond_t qfill = PTHREAD_COND_INITIALIZER;
 static pthread_mutex_t qmutex = PTHREAD_MUTEX_INITIALIZER;
 
@@ -21,8 +21,10 @@ void queue_init(queue* q){
     q->back = dummy;
     pthread_mutex_init(&q->frontlock, NULL);
     pthread_mutex_init(&q->backlock, NULL);
+    q->size = 0;
 }
 
+//TODO: prolly best if queue doesnt own obj
 void queue_push(queue *q, Task *t){
     qnode* temp = malloc(sizeof(qnode));
     Task* cpyTask = malloc(sizeof(Task));
@@ -39,32 +41,63 @@ void queue_push(queue *q, Task *t){
     pthread_mutex_lock(&q->backlock);
     q->back->next = temp;
     q->back = temp;
+    q->size++;
+    pthread_cond_signal(&qfill);
     pthread_mutex_unlock(&q->backlock);
 }
 
 //caller must free returned val!
+//MUST BE CALLED WITH q->frontlock HELD!!
 void queue_pop(queue *q, Task** val){
     // same as q.push problem
     //solved w/ dummy head
-    pthread_mutex_lock(&q->frontlock);
+    //pthread_mutex_lock(&q->frontlock);
+    /*
+    while(q->size < 1){
+        pthread_cond_wait(&qfill, &q->frontlock);
+    }
+    */
+    if(q->size < 1){
+        *val = NULL;
+        return;
+    }
     qnode* dummy = q->front;
     qnode* newh = dummy->next;
+    //should be guaranteed the queue is non empty after waking from condition
+    /*
     if(!newh){//empty q
         pthread_mutex_unlock(&q->frontlock);
         *val = NULL;
         return;
     }
+    */
     *val = newh->t;
     q->front = newh;
-    pthread_mutex_unlock(&q->frontlock);
-    free(dummy);
+    q->size--;
+    //pthread_mutex_unlock(&q->frontlock);
 }
 
-//thread pool implementation
+//thread function
 void* threadstart(void *arg){
-    
+    while(1){
+        Task* t = NULL;
+
+        pthread_mutex_lock(&g_taskqueue->frontlock);
+        while(g_taskqueue->size < 1){
+            pthread_cond_wait(&qfill, &g_taskqueue->frontlock);
+        }
+        queue_pop(g_taskqueue, &t);
+        pthread_mutex_unlock(&g_taskqueue->frontlock);
+        if(t==NULL){
+            continue;
+        }
+        
+
+        free(t);
+    }
     return NULL;
 }
+//thread pool implementation
 void thread_pool_init(int numthreads){
     if(numthreads < 1){
         numthreads = 1;
@@ -125,7 +158,7 @@ List* list_init(int t){
     temp->head=NULL;
     temp->size=0;
     temp->isList = t;
-    if(!t){//if its 2d list, dont need a lock
+    if(!t){//0=locks, 1=no locks
         pthread_mutex_init(&temp->guard, NULL);
     }
     return temp;
@@ -189,11 +222,10 @@ void listit_seek_to_start(List* l, ListIt* it){
 
 ListNode* listit_next(List* l, ListIt* it){
     ListNode* res = it->curr;
-    if(!res){
-        return res;
+    if(res){
+        //advance iterator if not last
+        it->curr = it->curr->next;
     }
-    //advance iterator if not last
-    it->curr = it->curr->next;
     return res;
 }
 
@@ -236,6 +268,8 @@ RDD *create_rdd(int numdeps, Transform t, void *fn, ...)
     RDD *dep = va_arg(args, RDD *);
     rdd->dependencies[i] = dep;
     maxpartitions = max(maxpartitions, dep->partitions->size);
+
+    dep->child = rdd;
   }
   va_end(args);
   //TODO: might not be correct use
@@ -245,6 +279,8 @@ RDD *create_rdd(int numdeps, Transform t, void *fn, ...)
   rdd->trans = t;
   rdd->fn = fn;
   //rdd->partitions = list_init(1);
+  rdd->child = NULL;
+  
   return rdd;
 }
 
@@ -259,6 +295,10 @@ RDD *map(RDD *dep, Mapper fn)
   }
 
   rdd->pdep = malloc(sizeof(int)*rdd->numpartitions);
+  if(rdd->pdep==NULL){
+      printf("map malloc error");
+      exit(1);
+  }
   for(int i=0; i<rdd->numpartitions; i++){
       rdd->pdep[i] = 1;
   }
@@ -276,10 +316,13 @@ RDD *filter(RDD *dep, Filter fn, void *ctx)
   }
 
   rdd->pdep = malloc(sizeof(int)*rdd->numpartitions);
+  if(rdd->pdep==NULL){
+      printf("filter malloc error");
+      exit(1);
+  }
   for(int i=0; i<rdd->numpartitions; i++){
       rdd->pdep[i] = 1;
   }
-  rdd->partitions = list_init(1);
   rdd->ctx = ctx;
   return rdd;
 }
@@ -296,8 +339,14 @@ RDD *partitionBy(RDD *dep, Partitioner fn, int numpartitions, void *ctx)
   }
 
   rdd->pdep = malloc(sizeof(int)*rdd->numpartitions);
+  rdd->pdeplock = malloc(sizeof(pthread_mutex_t)*rdd->numpartitions);
+  if(rdd->pdep==NULL || rdd->pdeplock==NULL){
+      printf("partition malloc error");
+      exit(1);
+  }
   for(int i=0; i<rdd->numpartitions; i++){
       rdd->pdep[i] = rdd->numdependencies;
+      pthread_mutex_init(&rdd->pdeplock[i], NULL);
   }
 
   rdd->ctx = ctx;
@@ -327,7 +376,7 @@ void *identity(void *arg)
 RDD *RDDFromFiles(char **filenames, int numfiles)
 {
   RDD *rdd = malloc(sizeof(RDD));
-  rdd->partitions = list_init(0);//file backed, t=0
+  rdd->partitions = list_init(0);//TODO: can make this no locked?
 
   for (int i = 0; i < numfiles; i++)
   {
@@ -346,25 +395,48 @@ RDD *RDDFromFiles(char **filenames, int numfiles)
 
   rdd->numpartitions = rdd->partitions->size;
   rdd->pdep = NULL;
+  rdd->child = NULL;
   return rdd;
 }
 
+//return all file backed RDDs in list
+void dfs(RDD* root, List* l){
+    if(root == NULL){//just in case
+        return;
+    }
+    if(root->trans == FILE_BACKED || root->numdependencies == 0){
+        list_add_elem(l, root);
+        return;
+    }
+
+    for(int i=0; i<root->numdependencies; i++){
+        dfs(root->dependencies[i], l);
+    }
+}
 void execute(RDD* rdd) {
-    //TODO: add checks for pdep[pnum] before submitting a partition to q
-    if(rdd->numdependencies == 0){//base
-        for(int i=0; i<rdd->numpartitions; i++){
+    List* leaves = list_init(1);
+    ListIt it;
+    dfs(rdd, leaves);
+    listit_seek_to_start(leaves, &it);
+    for(int i=0; i<leaves->size; i++){
+        RDD* curr = (RDD*)(listit_next(leaves, &it)->data);
+        for(int j=0; j<curr->numpartitions; j++){
             Task* t = malloc(sizeof(Task));
-            t->rdd = rdd;
-            t->pnum = i;
-            t->metric = NULL; //TODO
+            if(t==NULL){
+                perror("exe malloc");
+                exit(1);
+            }
+            t->rdd = curr;
+            t->pnum = j;
+            t->metric = NULL;
             thread_pool_submit(t);
-            free(t);
+            //free(t);//TODO: threads will free(t) after popping from queue
         }
     }
-    for(int i=0; i<rdd->numdependencies; i++){
-        execute(rdd->dependencies[i]);
-    }
-    return;
+
+    thread_pool_wait();
+    list_free(leaves);
+    //TODO: cleanup RDDs?
 }
 
 void MS_Run() {
