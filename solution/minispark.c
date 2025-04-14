@@ -79,24 +79,249 @@ void queue_pop(queue *q, Task** val){
 
 //thread function
 void* threadstart(void *arg){
-    while(1){
+    RDD* r = t -> rdd;
+	int pnum = t -> pnum;
+	while(1){
+		pthread_mutex_lock(&g_taskqueue -> frontlock);
+	while(g_taskqueue -> size < 1){
+		pthread_cond_wait(&qfill, &g_taskqueue -> frontlock);
+	}
         Task* t = NULL;
-
-        pthread_mutex_lock(&g_taskqueue->frontlock);
-        while(g_taskqueue->size < 1){
-            pthread_cond_wait(&qfill, &g_taskqueue->frontlock);
-        }
-        queue_pop(g_taskqueue, &t);
+		queue_pop(g_taskqueue, &t);
         pthread_mutex_unlock(&g_taskqueue->frontlock);
+        if(!t){
+			continue;
+		}
         if(t==NULL){
             continue;
         }
-        
+        if(r -> trans == FILE_BACKED){
+			if(r -> child){
+				pthread_mutex_lock(&r->child->pdeplock[p]);
+				r->child->pdep[p]--;
+			if(r->child->pdep[p] == 0){
+				Task task;
+				task.rdd = r->child;
+				task.pnum = pnum;
+				thread_pool_submit(&task);
+			}
+			thread_mutex_unlock(&r->child->pdeplock[p]);
+			}
+		}else if(r->trans == MAP){
+			RDD* parent = r->dependencies[0];
+			Mapper fn = (Mapper)r->fn;
+			ListNode* mapNode = r->partitions->head;
+			for(int i = 0; i < pnum; i++){
+				mapNode = mapNode -> next;
+			}
+			if(mapNode){
+				List* mapSub = (List*)mapNode -> data;
+				if(parent -> trans == FILE_BACKED){
+					ListNode* fileNode = parent -> partitions -> head;
+					for(int i = 0; i < p; i++){
+						fileNode = fileNode -> next;
+					}
+					if(fileNode){
+						FILE* f = (FILE*)fileNode -> data;
+						while(1){
+							void* item = fn((void*)f);
+							if(!item){
+								break;
+							}
+							list_add_elem(mapSub, item);
+						}
+					}
+				}else{
+					ListNode* partition = parent -> partitions -> head;
+					for(int i = 0; i < p; i++){
+						partition = partition -> next;
+					}
+					if(partition){
+						List* parentSub = (List*)partition -> data;
+						ListNode* curItem = parentSub -> head;
+						while(curItem){
+							void* inVal = curItem -> data;
+							while(1){
+								void* outVal = fn(inVal);
+								if(!outVal){
+									break;
+								}
+								list_add_elem(mapSub, outVal);
+							}
+							curItem = curItem -> next;
+						}
+					}
+				}
+			}
+			if(r->child){
+				pthread_mutext_lock(&r->child->pdeplock[p]);
+				r -> child -> pdep[p]--;
+				if(r->child->pdep[p] == 0){
+					Task task1;
+					task1.rdd = r->child;
+					task1.pnum = pnum;
+					thread_pool_submit(&task1);
+				}
+				pthread_mutex_unlock(&r->child->pdeplock[p]);
+			}
+		}else if(r->trans == FILTER){
+			RDD* parent = r -> dependencies[0];
+			Filter fn = (Filter)r -> fn;
+			void* ctx = r -> ctx;
+			ListNode* filter = r -> partitions -> head;
+			for(int i = 0; i < p; i++){
+				filter = filter -> next;
+			}
+			if(filter){
+				List* outList = (List*)filter -> data;
+				if(parent -> trans == FILE_BACKED){
+					ListNode* file = parent->partitions->head;
+					for(int i = 0; i < p; i++){
+						file = file->next;
+					}
+					if(file){
+                    FILE* f = (FILE*)fileNode->data;
+                    rewind(f);
+                    char* line = NULL;
+                    size_t size= 0;
+                    while(1){
+                        ssize_t n = getline(&line, &size, fp);
+                        if(n<0) {
+                            if(line) {
+                                free(line);
+                            }
+                            break;
+                        }
+                        int keep = fn(line, ctx);
+                        if(keep){
+                            list_add_elem(outList, line);
+                        } else {
+                            free(line);
+                        }
+                        line = NULL;
+                        size=0;
+                    }
+                }				
+				}else{
+					ListNode* partition = parent->partitions->head;
+					for(int i = 0; i < p; i++){
+						partition = partition -> next;
+					}
+					if(partition){
+						List* parentSub = (List*)partition -> data;
+						ListNode* curItem = parentSub -> head;
+						while(curItem){
+							void* inVal = curItem -> data;
+							int keep = fn(inVal, ctx);
+							if(keep){
+								list_add_elem(outList, inVal);
+							}
+							curItem = curItem -> next;
+						}
+					}
+				}
+			}
+			if(r->child){
+				pthread_mutex_lock(&r->child->pdeplock[p]);
+				r->child->pdep[p]--;
+				if(r->child->pdep[p] == 0){
+					Task task2;
+					task2.rdd = r->child;
+					task2.pnum = pnum;
+					thread_pool_submit(&task2);
+				}
+				pthread_mutex_unlock(&r -> child -> pdeplock[p]);
+			}
+		}else if(r -> trans == PARTITIONBY){
+			RDD* parent = r-> dependencies[0];
+			Partitioner fn = (Partitioner)r->fn;
+			void* ctx = r->ctx;
+			if(parent -> trans == FILE_BACKED){
+				ListNode* file = parent->partitions->head;
+                for(int i = 0; i < p; i++){
+                    file = file->next;
+                }
+                if(fileNode){
+                    FILE* f = (FILE*)fileNode->data;
+                    rewind(f);
+                    char* line = NULL;
+                    size_t size  = 0;
+                    while(1){
+                        ssize_t n = getline(&line, &size, fp);
+                        if(n<0) {
+                            if(line) free(line);
+                            break;
+                        }
+                        int new = fn(line, ctx);
+                        if(new<0) new=0;
+                        new = new % r->numpartitions;
 
+                        ListNode* outNode = r->partitions->head;
+                        for(int k=0; k<new; k++){
+                            outNode = outNode->next;
+                        }
+                        if(outNode){
+                            List* outList = (List*)outNode->data;
+                            list_add_elem(outList, line);
+                        } else {
+                            free(line);
+                        }
+                        line=NULL;
+                        size=0;
+                    }
+                }
+			}else{
+				ListNode* partition = parent->partitions->head;
+				for(int i = 0; i < p; i++){
+					partition = partition -> next;
+				}
+			if(partition){
+				List* parentSub = (List*)partition -> data;
+				ListNode* curItem = parentSub -> head;
+				while(curItem){
+					void* val = curItem -> data;
+					int new = fn(val, ctx);
+					if(new < 0){
+						new = 0;
+					}
+					new = new % r->numpartitions;
+					ListNode* outNode = r->partitions->head;
+					for(int j = 0; j < new; j++){
+						outNode = outNode -> next;
+					}
+					curItem = curItem -> next;
+				}
+			}
+		}
+		if(r -> child){
+			pthread_mutex_lock(&r->child->pdeplock[p]);
+			r->child->pdep[p]--;
+			if(r -> child -> pdep[p] == 0){
+				Task task3;
+				task3.rdd = r->child;
+				task3.pnum = pnum;
+				thread_pool_submit(&task3);
+			}
+			thread_mutex_unlock(&r->child->pdeplock[p]);
+		}
+	}else if(r -> trans == JOIN){
+		if(r->child){
+			pthread_mutex_lock(&r->child->pdeplock[p]);
+			r->child->pdep[p]--;
+			if(r->child->pdep[p] == 0){
+				Task task4;
+				task4.rdd = r -> child;
+				task4.pnum = pnum;
+				thread_pool_submit(&task4);
+				}
+				pthread_mutex_unlock(&r->child->pdeplock[p]);
+			}
+		}else{}
         free(t);
     }
     return NULL;
 }
+
 //thread pool implementation
 void thread_pool_init(int numthreads){
     if(numthreads < 1){
