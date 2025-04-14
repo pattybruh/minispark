@@ -92,6 +92,10 @@ void* threadstart(void *arg){
             continue;
         }
         
+        /*
+         * TODO: thread logic here
+         *
+         */
 
         free(t);
     }
