@@ -255,7 +255,6 @@ void* threadstart(void *arg){
                         int new = fn(line, ctx);
                         if(new<0) new=0;
                         new = new % r->numpartitions;
-
                         ListNode* outNode = r->partitions->head;
                         for(int k=0; k<new; k++){
                             outNode = outNode->next;
