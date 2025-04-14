@@ -5,3 +5,4 @@ bin/
 ./tests/tests-out/
 *.swp
 *.swo
+*.swl

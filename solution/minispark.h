@@ -74,8 +74,9 @@ List* list_init(int t);
 void list_add_elem(List* l, void* e);
 //add DATA element to a partition
 //TODO
-void list_append();
+void list_append(List* l, void* e);
 void list_free(List* l);
+ListNode* list_get(List* l, int idx);
 
 //list iterator
 typedef struct{
