@@ -7,7 +7,11 @@ static queue* g_taskqueue = NULL;
 
 //static pthread_cond_t qempty = PTHREAD_COND_INITIALIZER;
 static pthread_cond_t qfill = PTHREAD_COND_INITIALIZER;
+static pthread_cond_t qempty = PTHREAD_COND_INITIALIZER;
 static pthread_mutex_t qmutex = PTHREAD_MUTEX_INITIALIZER;
+
+static pthread_mutex_t g_pool_lock = PTHREAD_MUTEX_INITIALIZER;
+int g_activeThreads;
 
 //task queue
 void queue_init(queue* q){
@@ -25,6 +29,12 @@ void queue_init(queue* q){
     q->size = 0;
 }
 
+int queue_size(queue* q){
+    pthread_mutex_lock(&q->backlock);
+    int s = q->size;
+    pthread_mutex_unlock(&q->backlock);
+    return s;
+}
 //TODO: prolly best if queue doesnt own obj
 void queue_push(queue *q, Task *t){
     qnode* temp = malloc(sizeof(qnode));
@@ -53,31 +63,22 @@ void queue_pop(queue *q, Task** val){
     // same as q.push problem
     //solved w/ dummy head
     //pthread_mutex_lock(&q->frontlock);
-    /*
-    while(q->size < 1){
-        pthread_cond_wait(&qfill, &q->frontlock);
-    }
-    */
     if(q->size < 1){
         *val = NULL;
         return;
     }
     qnode* dummy = q->front;
     qnode* newh = dummy->next;
-    //should be guaranteed the queue is non empty after waking from condition
-    /*
-    if(!newh){//empty q
-        pthread_mutex_unlock(&q->frontlock);
-        *val = NULL;
-        return;
-    }
-    */
     *val = newh->t;
     q->front = newh;
     q->size--;
     //pthread_mutex_unlock(&q->frontlock);
 }
 
+int max(int a, int b)
+{
+  return a > b ? a : b;
+}
 //thread function
 void* threadstart(void *arg){
     while(1){
@@ -88,31 +89,35 @@ void* threadstart(void *arg){
         }
         queue_pop(g_taskqueue, &currT);
         pthread_mutex_unlock(&g_taskqueue->frontlock);
+
+        pthread_mutex_lock(&g_pool_lock);
         if(currT==NULL){
+            pthread_mutex_unlock(&g_pool_lock);
             continue;
         }
+        g_activeThreads++;
+        pthread_mutex_unlock(&g_pool_lock);
 
         RDD* currRDD = currT->rdd;
         if(currRDD == NULL){
             perror("NULL rdd submitted");
             exit(1);
         }
+
+        //exit thread
+        if(currRDD->trans == KILL){
+            pthread_mutex_lock(&g_pool_lock);
+            --g_activeThreads;
+            pthread_mutex_unlock(&g_pool_lock);
+            free(currT);
+            break;
+        }
         int pnum = currT->pnum;
 
         switch(currRDD->trans){
             case FILE_BACKED: {
-                //FILE_BACKED: paritions should be mapped 1:1
+                //FILE_BACKED: they should be mapped 1:1
                 //no work todo except submit child's partitions
-                if(currRDD->child){
-                    //locks are null unless paritionby
-                    if(--(currRDD->child->pdep[pnum]) == 0){
-                        Task newTask;
-                        newTask.rdd = currRDD->child;
-                        newTask.pnum = pnum;
-                        newTask.metric = NULL;
-                        thread_pool_submit(&newTask);
-                    }
-                }
                 break;
             }
             case MAP: {
@@ -143,113 +148,93 @@ void* threadstart(void *arg){
                         list_append(currP->data, func((it.curr)->data));
                     }
                 }
-
-                if(currRDD->child && (--(currRDD->child->pdep[pnum])==0)){
-                    Task newTask;
-                    newTask.rdd=currRDD->child;
-                    newTask.pnum = pnum;
-                    newTask.metric = NULL;
-                    thread_pool_submit(&newTask);
-                }
-                break;
-            }
-            case FILTER: {
+				break;
+			}
+			case FILTER: {
 				RDD* parentRDD = currRDD -> dependencies[0];
 				Filter fn = (Filter)currRDD -> fn;
-				ListNode* filter = list_get(currRDD->partitions, pnum);
-				if(!filter){
-					printf("error list_get\n");
-					exit(1);
-				}
-				if(!filter -> data){
+                ListNode* filter = list_get(currRDD->partitions, pnum);
+                if(!filter){
+                    printf("error list_get\n");
+                    exit(1);
+                }
+                if(!filter -> data){
 					filter -> data = list_init(0);
-				List* outList = (List*)filter -> data; 
-                ListNode* parentNode = list_get(parent->partitions, pnum);
-				if(!parentNode){
-					break;
-				}
-				if(parent->trans == FILE_BACKED){
-					FILE* fp = (FILE*)parentNode->data;
-					char* line = NULL;
-					size_t size = 0;
-					while(1){
-						ssize_t n = getline(&line, &size, fp);
-						if(n < 0){
-							if(line){
+					List* outList = (List*)filter -> data; 
+					ListNode* parentNode = list_get(parentRDD->partitions, pnum);
+					if(!parentNode){
+						break;
+					}
+					if(parentRDD->trans == FILE_BACKED){
+						FILE* fp = (FILE*)parentNode->data;
+						char* line = NULL;
+						size_t size = 0;
+						while(1){
+							ssize_t n = getline(&line, &size, fp);
+							if(n < 0){
+								if(line){
+									free(line);
+								}
+								break;
+							}
+							int keep = fn(line, currRDD->ctx);
+							if(keep){
+								list_append(outList, line);
+							}else{
 								free(line);
 							}
-							break;
+							line = NULL;
+							size = 0;
 						}
-						int keep = fn(line, currRdd->ctx);
-						if(keep != NULL){
-							list_append(outList, line);
-						}else{
-							free(line);
-						}
-						line = NULL;
-						size = 0;
-					}
-				}else{
-					List* parentList = (List*)parentNode -> data;
-					ListIt it;
-					listit_seek_to_start(parentList, &it);
-					while(1){
-						ListNode* node = listit_next(parentList, &it);
-						if(node == NULL){
-							break;
-						}
-						void* val = node->data;
-						int keep = fn(val, currRDD->ctx);
-						if(keep){
-							list_append(outList, val);
+					}else{
+						List* parentList = (List*)parentNode -> data;
+						ListIt it;
+						listit_seek_to_start(parentList, &it);
+						while(1){
+							ListNode* node = listit_next(parentList, &it);
+							if(node == NULL){
+								break;
+							}
+							void* val = node->data;
+							int keep = fn(val, currRDD->ctx);
+							if(keep){
+								list_append(outList, val);
+							}
 						}
 					}
-				}
-				if(currRDD->child){
-					if(--(currRDD->child->pdep[pnum]) == 0){
-						Task newTask;
-						newTask.rdd = currRDD->child;
-						newTask.pnum = pnum;
-						newTask.metric = NULL;
-						threa_pool_submit(&newTask);
-					}
-				}
-				break;
-                }
-            }
-                
-            case JOIN: {
-				RDD* parent1 = currRDD->dependencies[0];
-				RDD* parent2 = currRDD->dependencies[1];
-				Joiner fn = (Joiner)(currRdd->fn);
-				
-				ListNode* out = list_get(currRdd->partitions, pnum);
-				if(!out){
 					break;
 				}
-				if(!out->data){
-					out->data = list_init(0);
-				}
-				List* outList = (List*)out->data;
-				List p1List;
-				List p2List;
-				p1List.head = NULL;
-				p2List.head = NULL;
-				pthread_mutex_init(&p1List.guard, NULL);	
-				pthread_mutex_init(&p2List.guard, NULL);
-				p1List.size = 0;
-				p2List.size = 0;
-				p1List.isList = 0;
-				p2List.isList = 0;
-				
+			}
+            case JOIN: {
+                //TODO: avoid doubles, b/c both parent nodes could wake curr partition
+				Joiner fn = (Joiner)(currRDD->fn);
+				List* pl1 = list_get(currRDD->dependencies[0]->partitions, pnum)->data;
+				List* pl2 = list_get(currRDD->dependencies[1]->partitions, pnum)->data;
+				List* currP = list_get(currRDD->partitions, pnum)->data;
+                
+                ListIt it1;
+                ListNode* temp1;
+                listit_seek_to_start(pl1, &it1);
+                while((temp1=listit_next(pl1, &it1)) != NULL){
+                    ListIt it2;
+                    ListNode* temp2;
+                    listit_seek_to_start(pl2, &it2);
+                    while((temp2=listit_next(pl2, &it2))!=NULL){
+                        void* res = fn(temp1->data, temp2->data, currRDD->ctx);
+                        if(res != NULL){
+                            list_append(currP, res);
+                        }
+                    }
+                }
                 break;
             }
             case PARTITIONBY: {
+                RDD* parentRDD = currRDD->dependencies[0];
                 //TODO: only 1 parition is ever woken up
                 //need to find way to add all partitions of a PARITTIONBY to queue
+                //potential sol:
                 //
                 //right now we are assuming each thread just works on one partition
-                RDD* parentRDD = currRDD->dependencies[0];
                 Partitioner func = (Partitioner)(currRDD->fn);
                 //currP->data = list_init(0);//alr created by RDD* map()
                 ListNode const *parentP = list_get(parentRDD->partitions, pnum);
@@ -260,20 +245,52 @@ void* threadstart(void *arg){
                     int hashIdx = func(temp->data, currRDD->numpartitions, currRDD->ctx);
                     list_append(list_get(currRDD->partitions, hashIdx)->data, temp->data);
                 }
-
-                if(currRDD->child && (--(currRDD->child->pdep[pnum])==0)){
-                    Task newTask;
-                    newTask.rdd=currRDD->child;
-                    newTask.pnum = pnum;
-                    newTask.metric = NULL;
-                    thread_pool_submit(&newTask);
-                }
                 break;
             }
             default:
-                perror("invalid transform");
-                exit(1);
+                break;
         }
+
+        //PARITTIONBY AND JOINS NEED ALL PARITITONS WOKEN AT THE SAME TIME
+        //add locks
+        pthread_mutex_lock(&currRDD->pdeplock);
+        if(currRDD->child == NULL || (--(currRDD->child->pdep[pnum])!=0)){
+            pthread_mutex_unlock(&currRDD->pdeplock);
+
+            pthread_mutex_lock(&g_pool_lock);
+            if(--g_activeThreads == 0){
+                pthread_cond_signal(&qempty);
+            }
+            pthread_mutex_unlock(&g_pool_lock);
+            continue;
+        }
+        if(currRDD->child->trans==PARTITIONBY || currRDD->child->trans==JOIN){
+            //TODO: pdep[pnump]]==0 so we dont need to check others
+            //submit a task for each parent(current rdd) partition
+            int n = max(currRDD->numpartitions, currRDD->child->numpartitions);
+            for(int i=0; i<n; i++){
+                currRDD->pdep[i] = -1;
+                Task newTask;
+                newTask.rdd=currRDD->child;
+                newTask.pnum = i;
+                newTask.metric = NULL;
+                thread_pool_submit(&newTask);
+            }
+        }
+        else{
+            Task newTask;
+            newTask.rdd=currRDD->child;
+            newTask.pnum = pnum;
+            newTask.metric = NULL;
+            thread_pool_submit(&newTask);
+        }
+        pthread_mutex_unlock(&currRDD->pdeplock);
+
+        pthread_mutex_lock(&g_pool_lock);
+        if(--g_activeThreads == 0){
+            pthread_cond_signal(&qempty);
+        }
+        pthread_mutex_unlock(&g_pool_lock);
         free(currT);
     }
     return NULL;
@@ -308,9 +325,27 @@ void thread_pool_submit(Task* task){
 }
 
 void thread_pool_wait(){
+    //TODO: potential deadlock, holding 2 locks at the same time
+    //g_pool_lock, and queue_size waits for q->backlock 
+    pthread_mutex_lock(&g_pool_lock);
+    while(queue_size(g_taskqueue) != 0 || g_activeThreads > 0){
+        pthread_cond_wait(&qempty, &g_pool_lock);
+    }
+    pthread_mutex_unlock(&g_pool_lock);
 }
 
 void thread_pool_destroy(){
+    for(int i=0; i<g_threadCount; i++){
+        Task k;
+        k.rdd = malloc(sizeof(RDD));
+        if(k.rdd==NULL){
+            perror("pool destory malloc");
+            exit(1);
+        }
+        (k.rdd)->trans = KILL;
+        thread_pool_submit(&k);
+        free(k.rdd);
+    }
     for(int i=0; i<g_threadCount; i++){
         pthread_join(g_threads[i], NULL);
     }
@@ -459,10 +494,6 @@ void print_formatted_metric(TaskMetric* metric, FILE* fp) {
 	  metric->duration);
 }
 
-int max(int a, int b)
-{
-  return a > b ? a : b;
-}
 
 RDD *create_rdd(int numdeps, Transform t, void *fn, ...)
     //map(RDD* files, GetLines) => create_rdd(1, MA, GetLines, RDD* files)
@@ -489,13 +520,13 @@ RDD *create_rdd(int numdeps, Transform t, void *fn, ...)
     dep->child = rdd;
   }
   va_end(args);
-  //TODO: might not be correct use
-  rdd->numpartitions = maxpartitions;
-
-  rdd->numdependencies = numdeps;
   rdd->trans = t;
   rdd->fn = fn;
+  //TODO: might not be correct use
+  rdd->numpartitions = maxpartitions;
+  rdd->numdependencies = numdeps;
   //rdd->partitions = list_init(1);
+  pthread_mutex_init(&rdd->pdeplock, NULL);
   rdd->child = NULL;
   
   return rdd;
@@ -556,6 +587,8 @@ RDD *partitionBy(RDD *dep, Partitioner fn, int numpartitions, void *ctx)
   }
 
   rdd->pdep = malloc(sizeof(int)*rdd->numpartitions);
+  //pdeplock is init inside create_rdd();
+  /*
   rdd->pdeplock = malloc(sizeof(pthread_mutex_t)*rdd->numpartitions);
   if(rdd->pdep==NULL || rdd->pdeplock==NULL){
       printf("partition malloc error");
@@ -565,6 +598,7 @@ RDD *partitionBy(RDD *dep, Partitioner fn, int numpartitions, void *ctx)
       rdd->pdep[i] = rdd->numdependencies;
       pthread_mutex_init(&rdd->pdeplock[i], NULL);
   }
+  */
 
   rdd->ctx = ctx;
   return rdd;
@@ -584,7 +618,7 @@ RDD *join(RDD *dep1, RDD *dep2, Joiner fn, void *ctx)
       exit(1);
   }
   for(int i=0; i<rdd->numpartitions; i++){
-      rdd->pdep[i] = 
+      rdd->pdep[i] = rdd->numpartitions*2;
   }
   rdd->ctx = ctx;
   return rdd;
@@ -639,6 +673,7 @@ void dfs(RDD* root, List* l){
     }
 }
 void execute(RDD* rdd) {
+    g_activeThreads = 0;
     List* leaves = list_init(1);
     ListIt it;
     dfs(rdd, leaves);
@@ -651,7 +686,6 @@ void execute(RDD* rdd) {
             t.pnum = j;
             t.metric = NULL;
             thread_pool_submit(&t);
-            //free(t);//TODO: threads will free(t) after popping from queue
         }
     }
 
@@ -672,6 +706,7 @@ void MS_Run() {
 }
 
 void MS_TearDown() {
+    thread_pool_wait();
 	thread_pool_destroy();
 
 	//TODO: free all RDD's and lists
@@ -683,6 +718,18 @@ int count(RDD *rdd) {
 
   int count = 0;
   // count all the items in rdd
+  List* res = rdd->partitions;
+  ListIt it;
+  listit_seek_to_start(res, &it);
+  if(res->isList){//2d l
+    ListNode* temp;
+    while((temp = listit_next(res, &it))!=NULL){
+        count += ((List*)(temp->data))->size;
+    }
+  }
+  else{
+    count = res->size;
+  }
   return count;
 }
 
@@ -691,4 +738,23 @@ void print(RDD *rdd, Printer p) {
 
   // print all the items in rdd
   // aka... `p(item)` for all items in rdd
+  List* res = rdd->partitions;
+  ListIt it1;
+  listit_seek_to_start(res, &it1);
+  ListNode* temp1;
+  if(res->isList){//2d l
+    while((temp1 = listit_next(res, &it1))!=NULL){
+        ListNode* temp2;
+        ListIt it2;
+        listit_seek_to_start(temp1->data, &it2);
+        while((temp2 = listit_next(temp1->data, &it2))!=NULL){
+            p(temp2->data);
+        }
+    }
+  }
+  else{
+    while((temp1 = listit_next(res, &it1))!=NULL){
+        p(temp1->data);
+    }
+  }
 }

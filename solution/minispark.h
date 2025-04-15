@@ -36,7 +36,8 @@ typedef enum {
   FILTER,
   JOIN,
   PARTITIONBY,
-  FILE_BACKED
+  FILE_BACKED,
+  KILL
 } Transform;
 
 struct RDD {    
@@ -51,7 +52,8 @@ struct RDD {
 
   // you may want extra data members here
   //size of these 2 should be nunpartitions
-  pthread_mutex_t* pdeplock;//NULL IF TRANSFORMATION IS NOT PARTITION! (b/c maybe pdep[i] > 1)
+  //pthread_mutex_t* pdeplock;//NULL IF TRANSFORMATION IS NOT PARTITION! (b/c maybe pdep[i] > 1)
+  pthread_mutex_t pdeplock;
   int* pdep;
   RDD* child;
 };
