@@ -42,6 +42,7 @@ int queue_size(queue* q){
 //TODO: prolly best if queue doesnt own obj
 void queue_push(queue *q, Task *t){
     qnode* temp = malloc(sizeof(qnode));
+    /*
     Task* cpyTask = malloc(sizeof(Task));
     if(!temp || !cpyTask){
         perror("queue_push malloc");
@@ -50,6 +51,13 @@ void queue_push(queue *q, Task *t){
     *cpyTask = *t;
     temp->t = cpyTask;
     temp->next = NULL;
+    */
+   if(temp == NULL){
+    perror("queue_push malloc");
+    exit(1);
+   }
+   temp->t = t;
+   temp->next = NULL;
     
     // problem if queue size 1 has queue_pop and queue_push?
     //solved w/ dummy head
@@ -76,6 +84,7 @@ void queue_pop(queue *q, Task** val){
     *val = newh->t;
     q->front = newh;
     q->size--;
+    free(dummy);
     //pthread_mutex_unlock(&q->frontlock);
 }
 
@@ -294,12 +303,24 @@ void* threadstart(void *arg){
             }
         }
         else{
-            //printf("bruh\n");
-            Task newTask;
+            // printf("bruh\n");
+            Task *newTask = malloc(sizeof(Task));
+            if (!newTask)
+            {
+                perror("malloc Task");
+                exit(1);
+            }
+            newTask->rdd = currRDD->child;
+            newTask->pnum = pnum;
+            newTask->metric = NULL;
+            thread_pool_submit(newTask);
+            /*
+            Task *new Task newTask;
             newTask.rdd=currRDD->child;
             newTask.pnum = pnum;
             newTask.metric = NULL;
             thread_pool_submit(&newTask);
+            */
         }
         pthread_mutex_unlock(&currRDD->child->pdeplock);
 
