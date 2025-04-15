@@ -6,7 +6,7 @@ LIB_DIR = lib
 SOL_DIR = solution
 BIN_DIR = bin
 
-PROGRAMS = linecount cat grep grepcount sumjoin concurrency
+PROGRAMS = linecount cat grep grepcount sumjoin concurrency test
 
 MS_OBJS = $(SOL_DIR)/minispark.o  #Put .o files 
 

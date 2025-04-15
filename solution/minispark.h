@@ -1,19 +1,16 @@
-/*
 #ifndef _GNU_SOURCE
 #define _GNU_SOURCE
 #endif //_GNU_SOURCE
-*/
+
 #ifndef __minispark_h__
 #define __minispark_h__
-/*
+
 #include <stdlib.h>
 #include <stdio.h>
 #include <time.h>
 #include <stdarg.h>
 #include <pthread.h>
 #include <sched.h>
-*/
-#include <pthread.h>
 
 #define MAXDEPS (2)
 #define TIME_DIFF_MICROS(start, end) \
