@@ -64,6 +64,7 @@ struct ListNode{
 };
 struct List{
     ListNode* head;
+    ListNode* tail;
     pthread_mutex_t guard;
     int size;
     int isList;

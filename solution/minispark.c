@@ -1,5 +1,6 @@
 #include "minispark.h"
 
+
 static pthread_t* g_threads = NULL;
 static int g_threadCount = 0;
 static queue* g_taskqueue = NULL;
@@ -99,7 +100,7 @@ void* threadstart(void *arg){
         int pnum = currT->pnum;
 
         switch(currRDD->trans){
-            case FILE_BACKED:
+            case FILE_BACKED: {
                 //FILE_BACKED: paritions should be mapped 1:1
                 //no work todo except submit child's partitions
                 if(currRDD->child){
@@ -113,7 +114,8 @@ void* threadstart(void *arg){
                     }
                 }
                 break;
-            case MAP:
+            }
+            case MAP: {
                 //MAP: apply func to each element of parent partition
                 //if parent is FILE_BACKED just apply to partition until EOF
                 //results added to end of LL of current partition
@@ -124,7 +126,7 @@ void* threadstart(void *arg){
                     printf("error list_get\n");
                     exit(1);
                 }
-                currP->data = list_init(0);//element list
+                //currP->data = list_init(0);//alr created by RDD* map()
                 ListNode* parentP = list_get(parentRDD->partitions, pnum);
 
                 if(parentRDD->trans == FILE_BACKED){
@@ -140,62 +142,47 @@ void* threadstart(void *arg){
                     while((temp=listit_next(parentP->data, &it)) != NULL){
                         list_append(currP->data, func((it.curr)->data));
                     }
-                    /*
-                    ListNode* partition = parent -> partitions -> head;
-                    for(int i = 0; i < p; i++){
-                        partition = partition -> next;
-                    }
-                    if(partition){
-                        List* parentSub = (List*)partition -> data;
-                        ListNode* curItem = parentSub -> head;
-                        while(curItem){
-                            void* inVal = curItem -> data;
-                            while(1){
-                                void* outVal = fn(inVal);
-                                if(!outVal){
-                                    break;
-                                }
-                                list_add_elem(mapSub, outVal);
-                            }
-                            curItem = curItem -> next;
-                        }
-                    }
-                    */
                 }
 
-                if(--(currRDD->child->pdep[pnum])==0){
+                if(currRDD->child && (--(currRDD->child->pdep[pnum])==0)){
                     Task newTask;
                     newTask.rdd=currRDD->child;
                     newTask.pnum = pnum;
                     newTask.metric = NULL;
                     thread_pool_submit(&newTask);
                 }
-                /*
-                if(currP){
-                    List* mapSub = (List*)mapNode -> data;
-                    if(parent -> trans == FILE_BACKED){
-                    }else{
-                    }
-                }
-                if(r->child){
-                    pthread_mutext_lock(&r->child->pdeplock[p]);
-                    r -> child -> pdep[p]--;
-                    if(r->child->pdep[p] == 0){
-                        Task task1;
-                        task1.rdd = r->child;
-                        task1.pnum = pnum;
-                        thread_pool_submit(&task1);
-                    }
-                    pthread_mutex_unlock(&r->child->pdeplock[p]);
-                }
-                */
                 break;
+            }
             case FILTER:
                 break;
             case JOIN:
                 break;
-            case PARTITIONBY:
+            case PARTITIONBY: {
+                //TODO: only 1 parition is ever woken up
+                //need to find way to add all partitions of a PARITTIONBY to queue
+                //
+                //right now we are assuming each thread just works on one partition
+                RDD* parentRDD = currRDD->dependencies[0];
+                Partitioner func = (Partitioner)(currRDD->fn);
+                //currP->data = list_init(0);//alr created by RDD* map()
+                ListNode const *parentP = list_get(parentRDD->partitions, pnum);
+                ListIt it;
+                listit_seek_to_start(parentP->data, &it);
+                ListNode const *temp;
+                while((temp = listit_next(parentP->data, &it)) != NULL){
+                    int hashIdx = func(temp->data, currRDD->numpartitions, currRDD->ctx);
+                    list_append(list_get(currRDD->partitions, hashIdx)->data, temp->data);
+                }
+
+                if(currRDD->child && (--(currRDD->child->pdep[pnum])==0)){
+                    Task newTask;
+                    newTask.rdd=currRDD->child;
+                    newTask.pnum = pnum;
+                    newTask.metric = NULL;
+                    thread_pool_submit(&newTask);
+                }
                 break;
+            }
             default:
                 perror("invalid transform");
                 exit(1);
@@ -419,6 +406,7 @@ List* list_init(int t){
         exit(1);
     }
     temp->head=NULL;
+    temp->tail=NULL;
     temp->size=0;
     temp->isList = t;
     if(!t){//0=locks, 1=no locks
@@ -443,10 +431,35 @@ void list_add_elem(List* l, void* e){
     curr->next = l->head;
     l->head = curr;
     l->size++;
+    if(l->tail == NULL){
+        l->tail = curr;
+    }
     if(!l->isList){
         pthread_mutex_unlock(&l->guard);
     }
 } 
+void list_append(List* l, void* e){
+    if(l->tail == NULL){
+        list_add_elem(l, e);
+        return;
+    }
+    ListNode* curr = malloc(sizeof(ListNode));
+    if(curr==NULL){
+        perror("list add elem malloc fail");
+        exit(1);
+    }
+    curr->data = e;
+    if(!l->isList){
+        pthread_mutex_lock(&l->guard);
+    }
+    l->tail->next = curr;
+    l->size++;
+    if(!l->isList){
+        pthread_mutex_unlock(&l->guard);
+    }
+
+}
+
 void list_free(List* l){
     int b = l->isList;
     ListNode* front = l->head;
@@ -522,6 +535,7 @@ int max(int a, int b)
 RDD *create_rdd(int numdeps, Transform t, void *fn, ...)
     //map(RDD* files, GetLines) => create_rdd(1, MA, GetLines, RDD* files)
     //numdeps=1, Transform=MAP, fn=GetLines, dep=files
+  //RDD *rdd = create_rdd(2, JOIN, fn, dep1, dep2);
 {
   RDD *rdd = malloc(sizeof(RDD));
   if (rdd == NULL)
@@ -627,11 +641,19 @@ RDD *partitionBy(RDD *dep, Partitioner fn, int numpartitions, void *ctx)
 RDD *join(RDD *dep1, RDD *dep2, Joiner fn, void *ctx)
 {
   RDD *rdd = create_rdd(2, JOIN, fn, dep1, dep2);
-    /*
-  for(int i=0; i<maxpartitions; i++){
-      list_add_elem(rdd->partitions, NULL);
+  rdd->partitions = list_init(1);
+  for(int i=0; i<rdd->numpartitions; i++){
+      List* temp = list_init(0);
+      list_add_elem(rdd->partitions, temp);
   }
-  rdd->pdep = malloc(sizeof(int)**/
+  rdd->pdep = malloc(sizeof(int)*rdd->numpartitions);
+  if(rdd->pdep==NULL){
+      printf("filter malloc error");
+      exit(1);
+  }
+  for(int i=0; i<rdd->numpartitions; i++){
+      rdd->pdep[i] = 
+  }
   rdd->ctx = ctx;
   return rdd;
 }
