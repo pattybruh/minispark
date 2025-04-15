@@ -188,54 +188,6 @@ void* threadstart(void *arg){
                     }
                 }
                 break;
-/*
-                if(!filter -> data){
-					filter -> data = list_init(0);
-					List* outList = (List*)filter -> data; 
-					ListNode* parentNode = list_get(parentRDD->partitions, pnum);
-					if(!parentNode){
-						break;
-					}
-					if(parentRDD->trans == FILE_BACKED){
-						FILE* fp = (FILE*)parentNode->data;
-						char* line = NULL;
-						size_t size = 0;
-						while(1){
-							ssize_t n = getline(&line, &size, fp);
-							if(n < 0){
-								if(line){
-									free(line);
-								}
-								break;
-							}
-							int keep = fn(line, currRDD->ctx);
-							if(keep){
-								list_append(outList, line);
-							}else{
-								free(line);
-							}
-							line = NULL;
-							size = 0;
-						}
-					}else{
-						List* parentList = (List*)parentNode -> data;
-						ListIt it;
-						listit_seek_to_start(parentList, &it);
-						while(1){
-							ListNode* node = listit_next(parentList, &it);
-							if(node == NULL){
-								break;
-							}
-							void* val = node->data;
-							int keep = fn(val, currRDD->ctx);
-							if(keep){
-								list_append(outList, val);
-							}
-						}
-					}
-					break;
-				}
-                    */
 			}
             case JOIN: {
                 //TODO: avoid doubles, b/c both parent nodes could wake curr partition
@@ -296,6 +248,7 @@ void* threadstart(void *arg){
                 //pthread_cond_signal(&qempty);
             }
             pthread_mutex_unlock(&g_pool_lock);
+            free(currT);
             continue;
         }
         pthread_mutex_lock(&currRDD->child->pdeplock);
@@ -311,6 +264,7 @@ void* threadstart(void *arg){
                 //pthread_cond_signal(&qempty);
             }
             pthread_mutex_unlock(&g_pool_lock);
+            free(currT);
             continue;
         }
         //child->pdep[pnum]==0
@@ -431,7 +385,7 @@ void thread_pool_destroy(){
     while(h){
         qnode* curr = h;
         h=h->next;
-        free(curr->t);
+        //free(curr->t);
         free(curr);
     }
     free(g_taskqueue);
