@@ -191,16 +191,99 @@ void* threadstart(void *arg){
                 */
                 break;
             case FILTER:
-                break;
+				RDD* parentRDD = currRDD -> dependencies[0];
+				Filter fn = (Filter)currRDD -> fn;
+				ListNode* filter = list_get(currRDD->partitions, pnum);
+				if(!filter){
+					printf("error list_get\n");
+					exit(1);
+				}
+				if(!filter -> data){
+					filter -> data = list_init(0);
+				List* outList = (List*)filter -> data; 
+                ListNode* parentNode = list_get(parent->partitions, pnum);
+				if(!parentNode){
+					break;
+				}
+				if(parent->trans == FILE_BACKED){
+					FILE* fp = (FILE*)parentNode->data;
+					char* line = NULL;
+					size_t size = 0;
+					while(1){
+						ssize_t n = getline(&line, &size, fp);
+						if(n < 0){
+							if(line){
+								free(line);
+							}
+							break;
+						}
+						int keep = fn(line, currRdd->ctx);
+						if(keep != NULL){
+							list_append(outList, line);
+						}else{
+							free(line);
+						}
+						line = NULL;
+						size = 0;
+					}
+				}else{
+					List* parentList = (List*)parentNode -> data;
+					ListIt it;
+					listit_seek_to_start(parentList, &it);
+					while(1){
+						ListNode* node = listit_next(parentList, &it);
+						if(node == NULL){
+							break;
+						}
+						void* val = node->data;
+						int keep = fn(val, currRDD->ctx);
+						if(keep){
+							list_append(outList, val);
+						}
+					}
+				}
+				if(currRDD->child){
+					if(--(currRDD->child->pdep[pnum]) == 0){
+						Task newTask;
+						newTask.rdd = currRDD->child;
+						newTask.pnum = pnum;
+						newTask.metric = NULL;
+						threa_pool_submit(&newTask);
+					}
+				}
+				break;
             case JOIN:
+				RDD* parent1 = currRDD->dependencies[0];
+				RDD* parent2 = currRDD->dependencies[1];
+				Joiner fn = (Joiner)(currRdd->fn);
+				
+				ListNode* out = list_get(currRdd->partitions, pnum);
+				if(!out){
+					break;
+				}
+				if(!out->data){
+					out->data = list_init(0);
+				}
+				List* outList = (List*)out->data;
+				List p1List;
+				List p2List;
+				p1List.head = NULL;
+				p2List.head = NULL;
+				pthread_mutex_init(&p1List.guard, NULL);	
+				pthread_mutex_init(&p2List.guard, NULL);
+				p1List.size = 0;
+				p2List.size = 0;
+				p1List.isList = 0;
+				p2List.isList = 0;
+				
                 break;
-            case PARTITIONBY:
+            case PARTITIONBY
                 break;
             default:
                 perror("invalid transform");
                 exit(1);
         }
-        if(currRDD->trans == FILE_BACKED){
+        /*if(currRDD->trans == FILE_BACKED){
         }else if(r->trans == MAP){
         }else if(r->trans == FILTER){
             RDD* parent = r -> dependencies[0];
@@ -354,7 +437,7 @@ void* threadstart(void *arg){
                 }
                 pthread_mutex_unlock(&r->child->pdeplock[p]);
             }
-        }else{}
+        }else{}*/
         free(t);
     }
     return NULL;
