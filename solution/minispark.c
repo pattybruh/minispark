@@ -13,6 +13,10 @@ static pthread_mutex_t qmutex = PTHREAD_MUTEX_INITIALIZER;
 static pthread_mutex_t g_pool_lock = PTHREAD_MUTEX_INITIALIZER;
 int g_activeThreads;
 
+//debug vars TODO: remove
+static pthread_mutex_t dlock = PTHREAD_MUTEX_INITIALIZER ;
+int cnt = 0;
+
 //task queue
 void queue_init(queue* q){
     qnode* dummy= malloc(sizeof(qnode));
@@ -145,9 +149,8 @@ void* threadstart(void *arg){
 
                 if(parentRDD->trans == FILE_BACKED){
                     void* res=NULL;
-                    //printf("Reading from FILE* in partition %d\n", pnum);
                     while((res = func(parentP->data)) != NULL){
-                        //printf("read %s", (char*)res);
+                        //printf("read: %s", (char*)res);
                         list_append(currP->data, res);
                     }
                     //printf("done reading from FILE* in partition %d\n", pnum);
@@ -157,7 +160,7 @@ void* threadstart(void *arg){
                     listit_seek_to_start((List*)parentP->data, &it);
                     ListNode* temp;
                     while((temp=listit_next(parentP->data, &it)) != NULL){
-                        list_append(currP->data, func((it.curr)->data));
+                        list_append(currP->data, func(temp->data));
                     }
                 }
 				break;
@@ -222,6 +225,7 @@ void* threadstart(void *arg){
 				Joiner fn = (Joiner)(currRDD->fn);
 				List* pl1 = list_get(currRDD->dependencies[0]->partitions, pnum)->data;
 				List* pl2 = list_get(currRDD->dependencies[1]->partitions, pnum)->data;
+                //printf("pl1 size: %d, pl2 size: %d\n", pl1->size, pl2->size);
 				List* currP = list_get(currRDD->partitions, pnum)->data;
                 
                 ListIt it1;
@@ -294,6 +298,7 @@ void* threadstart(void *arg){
         }
         //child->pdep[pnum]==0
         if(currRDD->child->trans==PARTITIONBY || currRDD->child->trans==JOIN){
+            //printf("child is join/partition\n");
             //TODO: pdep[pnump]]==0 so we dont need to check others
             //submit a task for each parent(current rdd) partition
             int n = max(currRDD->numpartitions, currRDD->child->numpartitions);
