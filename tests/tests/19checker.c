@@ -48,9 +48,18 @@ int *populate_partitions(char **filename, int numfiles, int numlines, int nparti
     for (int i = 0; i < numfiles; i++)
     {
         FILE *f = fopen(filename[i], "r");
+        if (!f) {
+            printf("failed to open file %s\n", filename[i]);
+            exit(1);
+        }
         for (int j = 0; j < numlines; j++)
         {
-            int hash = ColumnHashPartitioner(SplitCols(GetLines(f)), npartitions, &pctx);
+            void * line = GetLines(f);
+            if (!line) {
+                printf("not enough line in file %s\n", filename[i]);
+                exit(1);
+            }
+            int hash = ColumnHashPartitioner(SplitCols(line), npartitions, &pctx);
             ret[hash]++;
         }
     }
@@ -99,7 +108,12 @@ int main()
     struct row **file1 = calloc(1024 * 512, sizeof(struct row *));
     for (int i = 0; i < 512 * 1024; i++)
     {
-        file1[i] = SplitCols(GetLines(stdin));
+        void * line = GetLines(stdin);
+        if (!line) {
+            printf("not enough output from 19.tmp\n");
+            exit(1);
+        }
+        file1[i] = SplitCols(line);
     }
     int file1res = checker(file1, 512, 1024, 53);
     if (file1res)
