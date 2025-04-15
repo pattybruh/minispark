@@ -168,11 +168,27 @@ void* threadstart(void *arg){
 			case FILTER: {
 				RDD* parentRDD = currRDD -> dependencies[0];
 				Filter fn = (Filter)currRDD -> fn;
+                ListNode* parentP = list_get(parentRDD->partitions, pnum);
                 ListNode* filter = list_get(currRDD->partitions, pnum);
                 if(!filter){
                     perror("error list_get");
                     exit(1);
                 }
+
+                ListNode* temp;
+                ListIt it;
+                if(parentRDD->trans == FILE_BACKED){
+                    printf("parent is filebacked\n");
+                    break;
+                }
+                listit_seek_to_start(parentP->data, &it);
+                while((temp=listit_next(parentP->data, &it))!= NULL){
+                    if(fn(temp->data, currRDD->ctx)){
+                        list_append(filter->data, temp->data);
+                    }
+                }
+                break;
+/*
                 if(!filter -> data){
 					filter -> data = list_init(0);
 					List* outList = (List*)filter -> data; 
@@ -219,6 +235,7 @@ void* threadstart(void *arg){
 					}
 					break;
 				}
+                    */
 			}
             case JOIN: {
                 //TODO: avoid doubles, b/c both parent nodes could wake curr partition
