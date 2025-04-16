@@ -1,5 +1,5 @@
 #include "minispark.h"
-
+#include <assert.h>
 
 static pthread_t* g_threads = NULL;
 static int g_threadCount = 0;
@@ -42,6 +42,7 @@ int queue_size(queue* q){
 //TODO: prolly best if queue doesnt own obj
 void queue_push(queue *q, Task *t){
     qnode* temp = malloc(sizeof(qnode));
+    /*
     Task* cpyTask = malloc(sizeof(Task));
     if(!temp || !cpyTask){
         perror("queue_push malloc");
@@ -50,6 +51,9 @@ void queue_push(queue *q, Task *t){
     *cpyTask = *t;
     temp->t = cpyTask;
     temp->next = NULL;
+    */
+   temp->t = t;
+   temp->next = NULL;
     
     // problem if queue size 1 has queue_pop and queue_push?
     //solved w/ dummy head
@@ -116,7 +120,7 @@ void* threadstart(void *arg){
             pthread_mutex_lock(&g_pool_lock);
             --g_activeThreads;
             pthread_mutex_unlock(&g_pool_lock);
-            free(currT);
+            //free(currT);
             break;
         }
         int pnum = currT->pnum;
@@ -228,7 +232,10 @@ void* threadstart(void *arg){
                 ListNode const *temp;
                 while((temp = listit_next(parentP->data, &it)) != NULL){
                     int hashIdx = func(temp->data, currRDD->numpartitions, currRDD->ctx);
-                    list_append(list_get(currRDD->partitions, hashIdx)->data, temp->data);
+                    if(hashIdx == pnum){
+                        list_append(list_get(currRDD->partitions, hashIdx)->data, temp->data);
+                    }
+                    //list_append(list_get(currRDD->partitions, hashIdx)->data, temp->data);
                 }
                 break;
             }
@@ -248,7 +255,7 @@ void* threadstart(void *arg){
                 //pthread_cond_signal(&qempty);
             }
             pthread_mutex_unlock(&g_pool_lock);
-            free(currT);
+            //free(currT);
             continue;
         }
         pthread_mutex_lock(&currRDD->child->pdeplock);
@@ -264,7 +271,7 @@ void* threadstart(void *arg){
                 //pthread_cond_signal(&qempty);
             }
             pthread_mutex_unlock(&g_pool_lock);
-            free(currT);
+            //free(currT);
             continue;
         }
         //child->pdep[pnum]==0
@@ -295,11 +302,23 @@ void* threadstart(void *arg){
         }
         else{
             //printf("bruh\n");
+            /*
             Task newTask;
             newTask.rdd=currRDD->child;
             newTask.pnum = pnum;
             newTask.metric = NULL;
             thread_pool_submit(&newTask);
+            */
+            Task *newTask = malloc(sizeof(Task));
+            if (!newTask)
+            {
+                perror("malloc Task");
+                exit(1);
+            }
+            newTask->rdd = currRDD->child;
+            newTask->pnum = pnum;
+            newTask->metric = NULL;
+            thread_pool_submit(newTask);
         }
         pthread_mutex_unlock(&currRDD->child->pdeplock);
 
@@ -311,7 +330,7 @@ void* threadstart(void *arg){
             //pthread_cond_signal(&qempty);
         }
         pthread_mutex_unlock(&g_pool_lock);
-        free(currT);
+        //free(currT);
     }
     return NULL;
 }
@@ -321,6 +340,7 @@ void thread_pool_init(int numthreads){
     if(numthreads < 1){
         numthreads = 1;
     }
+    //numthreads=1;
     g_threadCount = numthreads;
     //init global list of all threads
     g_threads = malloc(sizeof(pthread_t)*numthreads);
@@ -364,7 +384,7 @@ void thread_pool_destroy(){
     for(int i=0; i<g_threadCount; i++){
         Task* k = malloc(sizeof(Task));
         k->rdd = malloc(sizeof(RDD));
-        if(k->rdd==NULL){
+        if(k==NULL || k->rdd==NULL){
             perror("pool destory malloc");
             exit(1);
         }
@@ -378,7 +398,7 @@ void thread_pool_destroy(){
         pthread_join(g_threads[i], NULL);
     }
     g_threadCount = 0;
-    free(g_threads);
+    //free(g_threads);
     g_threads = NULL;
 
     qnode* h = g_taskqueue->front;
@@ -386,9 +406,9 @@ void thread_pool_destroy(){
         qnode* curr = h;
         h=h->next;
         //free(curr->t);
-        free(curr);
+        //free(curr);
     }
-    free(g_taskqueue);
+    //free(g_taskqueue);
     g_taskqueue = NULL;
 }
 
@@ -434,11 +454,14 @@ void list_add_elem(List* l, void* e){
     }
 } 
 void list_append(List* l, void* e){
+    assert((u_int64_t)e > 0x1000000);
     if(l->tail == NULL){
         list_add_elem(l, e);
         return;
     }
+    //ListNode* curr = calloc(sizeof(ListNode),1);
     ListNode* curr = malloc(sizeof(ListNode));
+    curr->next = NULL;
     if(curr==NULL){
         perror("list add elem malloc fail");
         exit(1);
@@ -551,11 +574,14 @@ RDD *create_rdd(int numdeps, Transform t, void *fn, ...)
   va_end(args);
   rdd->trans = t;
   rdd->fn = fn;
+  rdd->ctx = NULL;
+  rdd->partitions = NULL;
   //TODO: might not be correct use
   rdd->numpartitions = maxpartitions;
   rdd->numdependencies = numdeps;
   //rdd->partitions = list_init(1);
   pthread_mutex_init(&rdd->pdeplock, NULL);
+  rdd->pdep = NULL;
   rdd->child = NULL;
   
   return rdd;
@@ -617,6 +643,13 @@ RDD *partitionBy(RDD *dep, Partitioner fn, int numpartitions, void *ctx)
   }
 
   rdd->pdep = malloc(sizeof(int)*rdd->numpartitions);
+  if(rdd->pdep==NULL){
+      perror("parition malloc error");
+      exit(1);
+  }
+  for(int i=0; i<rdd->numpartitions; i++){
+      rdd->pdep[i] = rdd->numpartitions*2;
+  }
   //pdeplock is init inside create_rdd();
   /*
   rdd->pdeplock = malloc(sizeof(pthread_mutex_t)*rdd->numpartitions);
@@ -714,6 +747,10 @@ void execute(RDD* rdd) {
         for (int j = 0; j < curr->numpartitions; j++){
 
             Task *t = malloc(sizeof(Task));
+            if(t==NULL){
+                perror("kill malloc");
+                exit(1);
+            }
             t->rdd = curr;
             t->pnum = j;
             t->metric = NULL;
@@ -730,7 +767,7 @@ void execute(RDD* rdd) {
     }
 
     thread_pool_wait();
-    list_free(leaves);
+    //list_free(leaves);
     //TODO: cleanup RDDs?
 }
 
