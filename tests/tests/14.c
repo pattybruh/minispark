@@ -7,7 +7,7 @@
 #include "lib.h"
 #include "minispark.h"
 
-#define ROUNDS 9
+#define ROUNDS 5
 #define NUMFILES (1<<ROUNDS)
 
 int main() {

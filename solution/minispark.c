@@ -13,6 +13,12 @@ static pthread_mutex_t qmutex = PTHREAD_MUTEX_INITIALIZER;
 static pthread_mutex_t g_pool_lock = PTHREAD_MUTEX_INITIALIZER;
 int g_activeThreads;
 
+static pthread_t g_metricsThread;  
+static queue* g_metricQueue;     
+static pthread_cond_t g_metricCond = PTHREAD_COND_INITIALIZER;
+static int g_metricsRunning;
+FILE* g_metricsFile = NULL;
+
 //debug vars TODO: remove
 static pthread_mutex_t dlock = PTHREAD_MUTEX_INITIALIZER ;
 int cnt = 0;
@@ -54,6 +60,9 @@ void queue_push(queue *q, Task *t){
     // problem if queue size 1 has queue_pop and queue_push?
     //solved w/ dummy head
     pthread_mutex_lock(&q->backlock);
+    if (t->rdd->trans == PARTITIONBY) {
+		printf("%p %d\n", t->rdd, t->pnum);
+	}
     q->back->next = temp;
     q->back = temp;
     q->size++;
@@ -94,6 +103,9 @@ void* threadstart(void *arg){
             pthread_cond_wait(&qfill, &g_taskqueue->backlock);
         }
         queue_pop(g_taskqueue, &currT);
+		if (currT->metric) {
+		    clock_gettime(CLOCK_MONOTONIC, &currT->metric->scheduled);
+		}
         pthread_mutex_unlock(&g_taskqueue->backlock);
         //pthread_mutex_unlock(&g_taskqueue->frontlock);
 
@@ -301,7 +313,16 @@ void* threadstart(void *arg){
             newTask.metric = NULL;
             thread_pool_submit(&newTask);
         }
-        pthread_mutex_unlock(&currRDD->child->pdeplock);
+		if (currT->metric) {
+			struct timespec finish;
+			clock_gettime(CLOCK_MONOTONIC, &finish);
+			currT->metric->duration = TIME_DIFF_MICROS(currT->metric->scheduled, finish);
+
+			TaskMetric *copy = malloc(sizeof(TaskMetric));
+			*copy = *currT->metric;
+			metrics_submit(copy);
+		}
+		pthread_mutex_unlock(&currRDD->child->pdeplock);
 
         pthread_mutex_lock(&g_pool_lock);
         if(--g_activeThreads == 0){
@@ -316,11 +337,34 @@ void* threadstart(void *arg){
     return NULL;
 }
 
+void* metricsStart(void* arg) {
+    while(1) {
+        pthread_mutex_lock(&g_metricQueue->backlock);
+        while(g_metricQueue->size < 1 && g_metricsRunning) {
+            pthread_cond_wait(&g_metricCond, &g_metricQueue->backlock);
+        }
+        if(!g_metricsRunning && g_metricQueue->size < 1) {
+            pthread_mutex_unlock(&g_metricQueue->backlock);
+            break;
+        }
+        Task* currT = NULL;
+        queue_pop(g_metricQueue, &currT);
+        pthread_mutex_unlock(&g_metricQueue->backlock);
+
+        if(!currT) continue;
+
+        TaskMetric* m = (TaskMetric*)currT;
+        print_formatted_metric(m, g_metricsFile);
+    }
+    return NULL;
+}
+
 //thread pool implementation
 void thread_pool_init(int numthreads){
     if(numthreads < 1){
         numthreads = 1;
     }
+        numthreads = 1;
     g_threadCount = numthreads;
     //init global list of all threads
     g_threads = malloc(sizeof(pthread_t)*numthreads);
@@ -340,6 +384,27 @@ void thread_pool_init(int numthreads){
     }
 }
 
+void metrics_init() {
+	g_metricQueue = (queue*)malloc(sizeof(queue));
+	if(!g_metricQueue){
+		perror("metric malloc");
+		exit(1);
+	}
+	queue_init(g_metricQueue);
+
+	g_metricsFile = fopen("metrics.log", "w");
+	if(!g_metricsFile){
+        perror("fopen");
+        exit(1);
+    }
+    g_metricsRunning = 1;
+    int monitor = pthread_create(&g_metricsThread, NULL, metricsStart, NULL);
+    if(monitor!=0){
+	    perror("monitoring thread");
+        exit(1);
+    }
+}
+
 void thread_pool_submit(Task* task){
     if(task == NULL){
         printf("submitted null task\n");
@@ -347,6 +412,18 @@ void thread_pool_submit(Task* task){
     }
     //printf("SUBMIT: trans = %d, pnum = %d\n", task->rdd->trans, task->pnum);
     queue_push(g_taskqueue, task);
+}
+
+void metrics_submit(TaskMetric* metric) {
+    Task* task = (Task*)malloc(sizeof(Task));
+    task->metric = metric;
+    task->rdd    = NULL;  
+    task->pnum   = -1;
+
+    pthread_mutex_lock(&g_metricQueue->backlock);
+    queue_push(g_metricQueue, task);
+    pthread_cond_signal(&g_metricCond);
+    pthread_mutex_unlock(&g_metricQueue->backlock);
 }
 
 void thread_pool_wait(){
@@ -392,6 +469,28 @@ void thread_pool_destroy(){
     g_taskqueue = NULL;
 }
 
+void metrics_destroy() {
+    pthread_mutex_lock(&g_metricQueue->backlock);
+    g_metricsRunning = 0;
+    
+	pthread_cond_broadcast(&g_metricCond);
+    pthread_mutex_unlock(&g_metricQueue->backlock);
+
+    pthread_join(g_metricsThread, NULL);
+
+    fclose(g_metricsFile);
+    g_metricsFile= NULL;
+
+    qnode* c= g_metricQueue->front;
+    while(c){
+        qnode* nxt= c->next;
+        free(c->t); 
+        free(c);
+        c= nxt;
+    }
+    free(g_metricQueue);
+    g_metricQueue= NULL;
+}
 
 //LL functions
 List* list_init(int t){
@@ -742,13 +841,14 @@ void MS_Run() {
 		exit(1);
 	}
 	thread_pool_init(CPU_COUNT(&set));//create pool w/ same # of threads as cores
+	metrics_init();
 	return;
 }
 
 void MS_TearDown() {
     thread_pool_wait();
 	thread_pool_destroy();
-
+	metrics_destroy();
 	//TODO: free all RDD's and lists
 	return;
 }
