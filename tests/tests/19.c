@@ -20,16 +20,16 @@ int main() {
   struct colpart_ctx pctx;
   pctx.keynum = 0;
 
-  //for (int i=0; i< NUMFILES/2; i++) {
-  for(int i=0; i<1024/2; i++){
+  for (int i=0; i< NUMFILES/2; i++) {
+  //for(int i=0; i<1024/2; i++){
     filenames[i] = calloc(FILENAMESIZE,1);
     sprintf(filenames[i], "./test_files/largevals%d.txt", i);
      }
 
   files[0] = partitionBy(map(map(RDDFromFiles(filenames, NUMFILES/2), GetLines), SplitCols), ColumnHashPartitioner, 128, &pctx);
-  printf("p1 addr = %p\n", (void*)files[0]);
+  //printf("p1 addr = %p\n", (void*)files[0]);
   files[0] = partitionBy(files[0], ColumnHashPartitioner, 53, &pctx);
-  printf("p2 addr = %p\n", (void*)files[0]);
+  //printf("p2 addr = %p\n", (void*)files[0]);
   //files[0] = partitionBy(partitionBy(map(map(RDDFromFiles(filenames, NUMFILES/2), GetLines), SplitCols), ColumnHashPartitioner, 128, &pctx), ColumnHashPartitioner, 53, &pctx);
 
   print(files[0], RowPrinter);

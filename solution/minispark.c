@@ -43,6 +43,11 @@ int queue_size(queue* q){
 //TODO: prolly best if queue doesnt own obj
 //MUST HOLD BACKLOCK WHEN CALLING
 void queue_push(queue *q, Task *t){
+    /*
+    if(t->rdd->trans == PARTITIONBY){
+        printf("PUSH: trans = %d, pnum = %d\n", t->rdd->trans, t->pnum);
+    }
+    */
     //printf("PUSH: trans = %d, pnum = %d\n", t->rdd->trans, t->pnum);
     qnode* temp = malloc(sizeof(qnode));
    temp->t = t;
@@ -141,6 +146,7 @@ void* threadstart(void *arg){
                 break;
             }
             case MAP: {
+                //printf("map case\n");
                 //MAP: apply func to each element of parent partition
                 //if parent is FILE_BACKED just apply to partition until EOF
                 //results added to end of LL of current partition
@@ -233,21 +239,39 @@ void* threadstart(void *arg){
                 //potential sol:
                 //
                 //right now we are assuming each thread just works on one partition
+                /*
                 Partitioner func = (Partitioner)(currRDD->fn);
-                //currP->data = list_init(0);//alr created by RDD* map()
                 ListNode *parentP = list_get(parentRDD->partitions, pnum);
                 ListIt it;
                 listit_seek_to_start(parentP->data, &it);
                 ListNode *temp;
                 while((temp = listit_next(parentP->data, &it)) != NULL){
                     int hashIdx = func(temp->data, currRDD->numpartitions, currRDD->ctx);
-                    /*
-                    if(hashIdx == pnum){
-                        list_append(list_get(currRDD->partitions, hashIdx)->data, temp->data);
-                    }
-                        */
+                    //if(hashIdx == pnum){
+                        //list_append(list_get(currRDD->partitions, hashIdx)->data, temp->data);
+                    //}
                     list_append(list_get(currRDD->partitions, hashIdx)->data, temp->data);
                 }
+                */
+                //printf("partitionby case\n");
+                Partitioner func = (Partitioner)(currRDD->fn);
+                List* parentP = parentRDD->partitions;
+                ListIt it1;
+                listit_seek_to_start(parentP, &it1);
+                ListNode* temp1;
+                while((temp1 = listit_next(parentP, &it1)) != NULL){
+                    ListIt it2;
+                    listit_seek_to_start(temp1->data, &it2);
+                    ListNode* temp2;
+                    while((temp2 = listit_next(temp1->data, &it2)) != NULL){
+                        int hashIdx = func(temp2->data, currRDD->numpartitions, currRDD->ctx);
+                        //printf("hashidx: %d, pnum: %d\n", hashIdx, pnum);
+                        if(hashIdx == pnum){
+                            list_append(list_get(currRDD->partitions, hashIdx)->data, temp2->data);
+                        }
+                    }
+                }
+
                 //list_free(parentP->data);
                 break;
             }
@@ -255,9 +279,7 @@ void* threadstart(void *arg){
                 break;
         }
 
-
-        //PARITTIONBY AND JOINS NEED ALL PARITITONS WOKEN AT THE SAME TIME
-        //add locks
+        //task submission
         if(currRDD->child == NULL){
             //printf("rdd %d in partition %d has no child\n", currRDD->trans, pnum);
             pthread_mutex_lock(&g_pool_lock);
@@ -268,11 +290,25 @@ void* threadstart(void *arg){
             continue;
         }
         //printf("currRDD = %p, currRDD->child = %p\n", (void *)currRDD, (void *)currRDD->child);
-        assert(currRDD->child != NULL);
-        assert(currRDD->child->pdep != NULL);
+        //assert(currRDD->child != NULL);
+        //assert(currRDD->child->pdep != NULL);
         pthread_mutex_lock(&currRDD->child->pdeplock);
+        //if((currRDD->child->trans == PARTITIONBY) && (--(currRDD->child->pdep[0]) != 0)){
+        if(currRDD->child->trans == PARTITIONBY){
+            if(--(currRDD->child->pdep[0]) != 0){
+                //printf("#p: %d, %d, pdep: %d\n", currRDD->numpartitions, currRDD->child->trans, currRDD->child->pdep[0]);
+                pthread_mutex_unlock(&currRDD->child->pdeplock);
+
+                pthread_mutex_lock(&g_pool_lock);
+                --g_activeThreads;
+                pthread_mutex_unlock(&g_pool_lock);
+
+                check_if_done_and_signal();
+                continue;
+            }
+        }
+        else if(--(currRDD->child->pdep[pnum]) != 0){
         //if (pnum < currRDD->child->numpartitions && ((--currRDD->child->pdep[pnum]) != 0)){
-        if(--(currRDD->child->pdep[pnum]) != 0){
             //printf("currRDD->child->pdep[pnum] = %d\n", currRDD->child->pdep[pnum]);
             pthread_mutex_unlock(&currRDD->child->pdeplock);
 
@@ -288,9 +324,13 @@ void* threadstart(void *arg){
         pthread_mutex_lock(&g_pool_lock);
         ++g_submittingThreads;
         pthread_mutex_unlock(&g_pool_lock);
-/*
+
+        //pthread_mutex_lock(&g_taskqueue->backlock);
+
         if (currRDD->child->trans == PARTITIONBY){
+            //printf("partition child ready\n");
             for (int i = 0; i < currRDD->child->numpartitions; i++){
+                pthread_mutex_lock(&g_taskqueue->backlock);
                 Task *newTask = malloc(sizeof(Task));
                 if (!newTask)
                 {
@@ -298,26 +338,44 @@ void* threadstart(void *arg){
                     exit(1);
                 }
                 newTask->rdd = currRDD->child;
-                newTask->pnum = pnum;
+                newTask->pnum = i;
                 newTask->metric = NULL;
+                queue_push(g_taskqueue, newTask);
+
+                //pthread_cond_signal(&qfill);
+                pthread_mutex_unlock(&g_taskqueue->backlock);
             }
         }
-            */
+        else{
+            pthread_mutex_lock(&g_taskqueue->backlock);
+            Task *newTask = malloc(sizeof(Task));
+            if (!newTask){
+                perror("malloc Task");
+                exit(1);
+            }
+            newTask->rdd = currRDD->child;
+            newTask->pnum = pnum;
+            newTask->metric = NULL;
+            queue_push(g_taskqueue, newTask);
 
-
-        pthread_mutex_lock(&g_taskqueue->backlock);
-        Task *newTask = malloc(sizeof(Task));
-        if (!newTask)
-        {
-            perror("malloc Task");
-            exit(1);
+            //pthread_cond_signal(&qfill);
+            pthread_mutex_unlock(&g_taskqueue->backlock);
         }
-        newTask->rdd = currRDD->child;
-        newTask->pnum = pnum;
-        newTask->metric = NULL;
-        queue_push(g_taskqueue, newTask);
-        pthread_cond_signal(&qfill);
-        pthread_mutex_unlock(&g_taskqueue->backlock);
+        /*
+        pthread_mutex_lock(&g_taskqueue->backlock);
+         Task *newTask = malloc(sizeof(Task));
+         if (!newTask){
+             perror("malloc Task");
+             exit(1);
+         }
+         newTask->rdd = currRDD->child;
+         newTask->pnum = pnum;
+         newTask->metric = NULL;
+         queue_push(g_taskqueue, newTask);
+
+         pthread_cond_signal(&qfill);
+         pthread_mutex_unlock(&g_taskqueue->backlock);
+         */
 
         pthread_mutex_lock(&g_pool_lock);
         --g_submittingThreads;
@@ -680,17 +738,20 @@ RDD *partitionBy(RDD *dep, Partitioner fn, int numpartitions, void *ctx)
       list_add_elem(rdd->partitions, temp);
   }
 
-  rdd->pdep = malloc(sizeof(int)*rdd->numpartitions);
-  //rdd->pdep = malloc(sizeof(int));
+  //rdd->pdep = malloc(sizeof(int)*rdd->numpartitions);
+  rdd->pdep = malloc(sizeof(int));
   if(rdd->pdep==NULL){
       perror("parition malloc error");
       exit(1);
   }
-  //*(rdd->pdep) = rdd->numpartitions;
+  /*
   for(int i=0; i<rdd->numpartitions; i++){
-      //rdd->pdep[i] = rdd->numpartitions;
-      rdd->pdep[i] = 1;
+      rdd->pdep[i] = rdd->numpartitions;
+      //rdd->pdep[i] = 1;
   }
+      */
+    *(rdd->pdep)=rdd->dependencies[0]->numpartitions;
+    //printf("t: %d, %d\n", *(rdd->pdep), rdd->trans);
 
   rdd->ctx = ctx;
   return rdd;
@@ -857,6 +918,7 @@ void print(RDD *rdd, Printer p) {
         listit_seek_to_start(temp1->data, &it2);
         //printf("print ele size: %d\n", ((List*)(temp1->data))->size);
         while((temp2 = listit_next(temp1->data, &it2))!=NULL){
+            //printf("elem\n");
             p(temp2->data);
         }
     }
