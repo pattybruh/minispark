@@ -41,19 +41,21 @@ int queue_size(queue* q){
     return s;
 }
 //TODO: prolly best if queue doesnt own obj
+//MUST HOLD BACKLOCK WHEN CALLING
 void queue_push(queue *q, Task *t){
+    //printf("PUSH: trans = %d, pnum = %d\n", t->rdd->trans, t->pnum);
     qnode* temp = malloc(sizeof(qnode));
    temp->t = t;
    temp->next = NULL;
     
     // problem if queue size 1 has queue_pop and queue_push?
     //solved w/ dummy head
-    pthread_mutex_lock(&q->backlock);
+    //pthread_mutex_lock(&q->backlock);
     q->back->next = temp;
     q->back = temp;
     q->size++;
     pthread_cond_signal(&qfill);
-    pthread_mutex_unlock(&q->backlock);
+    //pthread_mutex_unlock(&q->backlock);
 }
 
 //caller must free returned val!
@@ -79,11 +81,21 @@ int max(int a, int b)
   return a > b ? a : b;
 }
 //thread function
-void dec_activeThreads(){
+void check_if_done_and_signal() {
     pthread_mutex_lock(&g_pool_lock);
-    --g_activeThreads;
+    int active = g_activeThreads;
+    int submitting = g_submittingThreads;
     pthread_mutex_unlock(&g_pool_lock);
+
+    pthread_mutex_lock(&g_taskqueue->backlock);
+    int qsize = g_taskqueue->size;
+    pthread_mutex_unlock(&g_taskqueue->backlock);
+
+    if (active == 0 && submitting == 0 && qsize == 0) {
+        pthread_cond_signal(&qempty);
+    }
 }
+
 void* threadstart(void *arg){
     while(1){
         Task* currT = NULL;
@@ -95,14 +107,12 @@ void* threadstart(void *arg){
         }
         queue_pop(g_taskqueue, &currT);
         pthread_mutex_unlock(&g_taskqueue->backlock);
-        //pthread_mutex_unlock(&g_taskqueue->frontlock);
-
-        pthread_mutex_lock(&g_pool_lock);
         if(currT==NULL){
-            pthread_mutex_unlock(&g_pool_lock);
             continue;
         }
-        g_activeThreads++;
+
+        pthread_mutex_lock(&g_pool_lock);
+        ++g_activeThreads;
         pthread_mutex_unlock(&g_pool_lock);
 
         RDD* currRDD = currT->rdd;
@@ -225,10 +235,10 @@ void* threadstart(void *arg){
                 //right now we are assuming each thread just works on one partition
                 Partitioner func = (Partitioner)(currRDD->fn);
                 //currP->data = list_init(0);//alr created by RDD* map()
-                ListNode const *parentP = list_get(parentRDD->partitions, pnum);
+                ListNode *parentP = list_get(parentRDD->partitions, pnum);
                 ListIt it;
                 listit_seek_to_start(parentP->data, &it);
-                ListNode const *temp;
+                ListNode *temp;
                 while((temp = listit_next(parentP->data, &it)) != NULL){
                     int hashIdx = func(temp->data, currRDD->numpartitions, currRDD->ctx);
                     /*
@@ -238,43 +248,64 @@ void* threadstart(void *arg){
                         */
                     list_append(list_get(currRDD->partitions, hashIdx)->data, temp->data);
                 }
+                //list_free(parentP->data);
                 break;
             }
             default:
                 break;
         }
 
+
         //PARITTIONBY AND JOINS NEED ALL PARITITONS WOKEN AT THE SAME TIME
         //add locks
         if(currRDD->child == NULL){
             //printf("rdd %d in partition %d has no child\n", currRDD->trans, pnum);
             pthread_mutex_lock(&g_pool_lock);
-            if(--g_activeThreads == 0){
-                if(queue_size(g_taskqueue)==0 && g_activeThreads ==0){
-                    pthread_cond_signal(&qempty);
-                }
-                //pthread_cond_signal(&qempty);
-            }
+            --g_activeThreads;
             pthread_mutex_unlock(&g_pool_lock);
-            //free(currT);
+
+            check_if_done_and_signal();
             continue;
         }
+        //printf("currRDD = %p, currRDD->child = %p\n", (void *)currRDD, (void *)currRDD->child);
+        assert(currRDD->child != NULL);
+        assert(currRDD->child->pdep != NULL);
         pthread_mutex_lock(&currRDD->child->pdeplock);
+        //if (pnum < currRDD->child->numpartitions && ((--currRDD->child->pdep[pnum]) != 0)){
         if(--(currRDD->child->pdep[pnum]) != 0){
             //printf("currRDD->child->pdep[pnum] = %d\n", currRDD->child->pdep[pnum]);
             pthread_mutex_unlock(&currRDD->child->pdeplock);
 
             pthread_mutex_lock(&g_pool_lock);
-            if(--g_activeThreads == 0){
-                if(queue_size(g_taskqueue)==0){
-                    pthread_cond_signal(&qempty);
-                }
-                //pthread_cond_signal(&qempty);
-            }
+            --g_activeThreads;
             pthread_mutex_unlock(&g_pool_lock);
-            //free(currT);
+
+            check_if_done_and_signal();
             continue;
         }
+        pthread_mutex_unlock(&currRDD->child->pdeplock);
+
+        pthread_mutex_lock(&g_pool_lock);
+        ++g_submittingThreads;
+        pthread_mutex_unlock(&g_pool_lock);
+/*
+        if (currRDD->child->trans == PARTITIONBY){
+            for (int i = 0; i < currRDD->child->numpartitions; i++){
+                Task *newTask = malloc(sizeof(Task));
+                if (!newTask)
+                {
+                    perror("malloc Task");
+                    exit(1);
+                }
+                newTask->rdd = currRDD->child;
+                newTask->pnum = pnum;
+                newTask->metric = NULL;
+            }
+        }
+            */
+
+
+        pthread_mutex_lock(&g_taskqueue->backlock);
         Task *newTask = malloc(sizeof(Task));
         if (!newTask)
         {
@@ -284,18 +315,16 @@ void* threadstart(void *arg){
         newTask->rdd = currRDD->child;
         newTask->pnum = pnum;
         newTask->metric = NULL;
-        thread_pool_submit(newTask);
-
-        pthread_mutex_unlock(&currRDD->child->pdeplock);
+        queue_push(g_taskqueue, newTask);
+        pthread_cond_signal(&qfill);
+        pthread_mutex_unlock(&g_taskqueue->backlock);
 
         pthread_mutex_lock(&g_pool_lock);
-        if(--g_activeThreads == 0){
-            if(queue_size(g_taskqueue)==0){
-                pthread_cond_signal(&qempty);
-            }
-            //pthread_cond_signal(&qempty);
-        }
+        --g_submittingThreads;
+        --g_activeThreads;
         pthread_mutex_unlock(&g_pool_lock);
+
+        check_if_done_and_signal();
         //free(currT);
     }
     return NULL;
@@ -308,6 +337,7 @@ void thread_pool_init(int numthreads){
     }
     //numthreads=1;
     g_threadCount = numthreads;
+    //printf("init with threadcount %d\n", g_threadCount);
     g_submittingThreads = 0;
     //printf("%d threads\n", numthreads);
     //init global list of all threads
@@ -333,22 +363,34 @@ void thread_pool_submit(Task* task){
         printf("submitted null task\n");
         return;
     }
-    printf("SUBMIT: trans = %d, pnum = %d\n", task->rdd->trans, task->pnum);
+    //printf("SUBMIT: trans = %d, pnum = %d\n", task->rdd->trans, task->pnum);
     queue_push(g_taskqueue, task);
 }
 
 void thread_pool_wait(){
     //TODO: potential deadlock, holding 2 locks at the same time
-    //g_pool_lock, and queue_size waits for q->backlock 
+    //g_pool_lock, and queue_size waits for q->backlock
     pthread_mutex_lock(&g_pool_lock);
-    //printf("q size: %d\n", queue_size(g_taskqueue));
-    while(queue_size(g_taskqueue) != 0 || g_activeThreads > 0){
+    while (1){
+        pthread_mutex_unlock(&g_pool_lock);
+
+        pthread_mutex_lock(&g_taskqueue->backlock);
+        int qsize = g_taskqueue->size;
+        pthread_mutex_unlock(&g_taskqueue->backlock);
+
+        pthread_mutex_lock(&g_pool_lock);
+        if (g_activeThreads == 0 && g_submittingThreads == 0 && qsize == 0){
+            break;
+        }
+
         pthread_cond_wait(&qempty, &g_pool_lock);
     }
     pthread_mutex_unlock(&g_pool_lock);
 }
 
 void thread_pool_destroy(){
+    pthread_mutex_lock(&g_taskqueue->backlock);
+    //printf("thread count @ destroy: %d\n", g_threadCount);
     for(int i=0; i<g_threadCount; i++){
         Task* k = malloc(sizeof(Task));
         k->rdd = malloc(sizeof(RDD));
@@ -359,9 +401,12 @@ void thread_pool_destroy(){
         k->rdd->trans = KILL;
         k->pnum = -1;
         k->metric = NULL;
-        thread_pool_submit(k);
+        //thread_pool_submit(k);
+        queue_push(g_taskqueue, k);
         //free(k.rdd);
     }
+    pthread_mutex_unlock(&g_taskqueue->backlock);
+
     for(int i=0; i<g_threadCount; i++){
         pthread_join(g_threads[i], NULL);
     }
@@ -524,15 +569,6 @@ ListNode* listit_next(List* l, ListIt* it){
     }
     return res;
 }
-/*
-int listit_next(List* l, ListIt* it){
-    if(it->curr){
-        it->curr = it->curr->next;
-        return 1;
-    }
-    return 0;
-}
-*/
 
 // Working with metrics...
 // Recording the current time in a `struct timespec`:
@@ -645,26 +681,16 @@ RDD *partitionBy(RDD *dep, Partitioner fn, int numpartitions, void *ctx)
   }
 
   rdd->pdep = malloc(sizeof(int)*rdd->numpartitions);
+  //rdd->pdep = malloc(sizeof(int));
   if(rdd->pdep==NULL){
       perror("parition malloc error");
       exit(1);
   }
+  //*(rdd->pdep) = rdd->numpartitions;
   for(int i=0; i<rdd->numpartitions; i++){
-      //rdd->pdep[i] = rdd->numpartitions*2;
+      //rdd->pdep[i] = rdd->numpartitions;
       rdd->pdep[i] = 1;
   }
-  //pdeplock is init inside create_rdd();
-  /*
-  rdd->pdeplock = malloc(sizeof(pthread_mutex_t)*rdd->numpartitions);
-  if(rdd->pdep==NULL || rdd->pdeplock==NULL){
-      printf("partition malloc error");
-      exit(1);
-  }
-  for(int i=0; i<rdd->numpartitions; i++){
-      rdd->pdep[i] = rdd->numdependencies;
-      pthread_mutex_init(&rdd->pdeplock[i], NULL);
-  }
-  */
 
   rdd->ctx = ctx;
   return rdd;
@@ -749,11 +775,13 @@ void execute(RDD* rdd) {
     List* leaves = list_init(1);
     ListIt it;
     dfs(rdd, leaves);
+    //printf("leaves size: %d\n", leaves->size);
     listit_seek_to_start(leaves, &it);
     for(int i=0; i<leaves->size; i++){
         RDD* curr = (RDD*)(listit_next(leaves, &it)->data);
         for (int j = 0; j < curr->numpartitions; j++){
 
+            pthread_mutex_lock(&g_taskqueue->backlock);
             Task *t = malloc(sizeof(Task));
             if(t==NULL){
                 perror("kill malloc");
@@ -762,15 +790,9 @@ void execute(RDD* rdd) {
             t->rdd = curr;
             t->pnum = j;
             t->metric = NULL;
-            thread_pool_submit(t);
-
-            /*
-            Task t;
-            t.rdd = curr;
-            t.pnum = j;
-            t.metric = NULL;
-            thread_pool_submit(&t);
-            */
+            //thread_pool_submit(t);
+            queue_push(g_taskqueue, t);
+            pthread_mutex_unlock(&g_taskqueue->backlock);
         }
     }
 
