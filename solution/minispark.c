@@ -20,10 +20,6 @@ static pthread_cond_t g_metricCond = PTHREAD_COND_INITIALIZER;
 static int g_metricsRunning;
 FILE* g_metricsFile = NULL;
 
-//debug vars TODO: remove
-static pthread_mutex_t dlock = PTHREAD_MUTEX_INITIALIZER ;
-int cnt = 0;
-
 //task queue
 void queue_init(queue* q){
     qnode* dummy= malloc(sizeof(qnode));
@@ -35,7 +31,6 @@ void queue_init(queue* q){
     dummy->next = NULL;
     q->front= dummy;
     q->back = dummy;
-    //pthread_mutex_init(&q->frontlock, NULL);
     pthread_mutex_init(&q->backlock, NULL);
     q->size = 0;
 }
@@ -49,11 +44,6 @@ int queue_size(queue* q){
 //TODO: prolly best if queue doesnt own obj
 //MUST HOLD BACKLOCK WHEN CALLING
 void queue_push(queue *q, Task *t){
-    /*
-    if(t->rdd->trans == PARTITIONBY){
-        printf("PUSH: trans = %d, pnum = %d\n", t->rdd->trans, t->pnum);
-    }
-    */
     //printf("PUSH: trans = %d, pnum = %d\n", t->rdd->trans, t->pnum);
     qnode* temp = malloc(sizeof(qnode));
    temp->t = t;
@@ -78,12 +68,10 @@ void metric_push(queue *q, Task *t){
     temp->t = t;
     temp->next = NULL;
 
-    //pthread_mutex_lock(&q->backlock);
     q->back->next = temp;
     q->back = temp;
     q->size++;
     pthread_cond_signal(&g_metricCond);
-    //pthread_mutex_unlock(&q->backlock);
 }
 
 //caller must free returned val!
@@ -143,9 +131,6 @@ void* threadstart(void *arg){
         ++g_activeThreads;
         pthread_mutex_unlock(&g_pool_lock);
 		
-		/*if (currT->metric) {
-            clock_gettime(CLOCK_MONOTONIC, &currT->metric->scheduled);
-        }*/
         RDD* currRDD = currT->rdd;
         if(currRDD == NULL){
             perror("NULL rdd submitted");
@@ -158,27 +143,13 @@ void* threadstart(void *arg){
             pthread_mutex_lock(&g_pool_lock);
             --g_activeThreads;
             pthread_mutex_unlock(&g_pool_lock);
-            /*if (currT->metric) {
-                Task* metricTask = malloc(sizeof(Task));
-                if (!metricTask) {
-                    perror("malloc metricTask");
-                    exit(1);
-                }
-                metricTask->metric = currT->metric;
-                metricTask->rdd = NULL;
-                metricTask->pnum = -1;
-                pthread_mutex_lock(&g_metricQueue->backlock);
-                queue_push(g_metricQueue, metricTask);
-                pthread_cond_signal(&g_metricCond);
-                pthread_mutex_unlock(&g_metricQueue->backlock);
-                currT->metric = NULL;
-            }*/
 			//free(currT);
             break;
         }
-		if (currT->metric) {
-            clock_gettime(CLOCK_MONOTONIC, &currT->metric->scheduled);
+        if(currT->metric == NULL){
+            //printf("metric null\n");
         }
+        clock_gettime(CLOCK_MONOTONIC, &currT->metric->scheduled);
         int pnum = currT->pnum;
         //printf("running task on %d rdd on partition %d\n", currRDD->trans, pnum);
 
@@ -201,7 +172,6 @@ void* threadstart(void *arg){
                     perror("error list_get\n");
                     exit(1);
                 }
-                //currP->data = list_init(0);//alr created by RDD* map()
                 ListNode* parentP = list_get(parentRDD->partitions, pnum);
                 if(parentP == NULL){
                     //printf("MAP: parentP = NULL on rdd %d, in pnum %d\n", currRDD->trans, pnum);
@@ -231,12 +201,6 @@ void* threadstart(void *arg){
 				Filter fn = (Filter)currRDD -> fn;
                 ListNode* parentP = list_get(parentRDD->partitions, pnum);
                 List* filter = list_get(currRDD->partitions, pnum)->data;
-                /*
-                if(!filter){
-                    perror("error list_get");
-                    exit(1);
-                }
-                    */
 
                 ListNode* temp;
                 ListIt it;
@@ -282,22 +246,6 @@ void* threadstart(void *arg){
                 //need to find way to add all partitions of a PARITTIONBY to queue
                 //potential sol:
                 //
-                //right now we are assuming each thread just works on one partition
-                /*
-                Partitioner func = (Partitioner)(currRDD->fn);
-                ListNode *parentP = list_get(parentRDD->partitions, pnum);
-                ListIt it;
-                listit_seek_to_start(parentP->data, &it);
-                ListNode *temp;
-                while((temp = listit_next(parentP->data, &it)) != NULL){
-                    int hashIdx = func(temp->data, currRDD->numpartitions, currRDD->ctx);
-                    //if(hashIdx == pnum){
-                        //list_append(list_get(currRDD->partitions, hashIdx)->data, temp->data);
-                    //}
-                    list_append(list_get(currRDD->partitions, hashIdx)->data, temp->data);
-                }
-                */
-                //printf("partitionby case\n");
                 Partitioner func = (Partitioner)(currRDD->fn);
                 List* parentP = parentRDD->partitions;
                 ListIt it1;
@@ -323,14 +271,21 @@ void* threadstart(void *arg){
                 break;
         }
 
-        if (currT->metric) {
-            struct timespec completed;
-            clock_gettime(CLOCK_MONOTONIC, &completed);
-            currT->metric->duration = TIME_DIFF_MICROS(currT->metric->scheduled, completed);
-            metric_push(g_metricQueue, currT->metric);
-            currT->metric = NULL;
-		}
-		//task submission
+        struct timespec completed;
+        clock_gettime(CLOCK_MONOTONIC, &completed);
+        currT->metric->duration = TIME_DIFF_MICROS(currT->metric->scheduled, completed);
+        Task* metricTask = malloc(sizeof(Task));
+        if(metricTask==NULL){
+            perror("metric task malloc");
+            exit(1);
+        }
+        metricTask->metric = currT->metric;
+        pthread_mutex_lock(&g_metricQueue->backlock);
+        metric_push(g_metricQueue, metricTask);
+        pthread_mutex_unlock(&g_metricQueue->backlock);
+        //currT->metric = NULL;
+
+        //task submission
         if(currRDD->child == NULL){
             //printf("rdd %d in partition %d has no child\n", currRDD->trans, pnum);
             pthread_mutex_lock(&g_pool_lock);
@@ -341,8 +296,6 @@ void* threadstart(void *arg){
             continue;
         }
         //printf("currRDD = %p, currRDD->child = %p\n", (void *)currRDD, (void *)currRDD->child);
-        //assert(currRDD->child != NULL);
-        //assert(currRDD->child->pdep != NULL);
         pthread_mutex_lock(&currRDD->child->pdeplock);
         //if((currRDD->child->trans == PARTITIONBY) && (--(currRDD->child->pdep[0]) != 0)){
         if(currRDD->child->trans == PARTITIONBY){
@@ -359,7 +312,6 @@ void* threadstart(void *arg){
             }
         }
         else if(--(currRDD->child->pdep[pnum]) != 0){
-        //if (pnum < currRDD->child->numpartitions && ((--currRDD->child->pdep[pnum]) != 0)){
             //printf("currRDD->child->pdep[pnum] = %d\n", currRDD->child->pdep[pnum]);
             pthread_mutex_unlock(&currRDD->child->pdeplock);
 
@@ -400,7 +352,6 @@ void* threadstart(void *arg){
                 clock_gettime(CLOCK_MONOTONIC, &newTask->metric->created); 
 				queue_push(g_taskqueue, newTask);
 
-                //pthread_cond_signal(&qfill);
                 pthread_mutex_unlock(&g_taskqueue->backlock);
             }
         }
@@ -426,21 +377,6 @@ void* threadstart(void *arg){
             //pthread_cond_signal(&qfill);
             pthread_mutex_unlock(&g_taskqueue->backlock);
         }
-        /*
-        pthread_mutex_lock(&g_taskqueue->backlock);
-         Task *newTask = malloc(sizeof(Task));
-         if (!newTask){
-             perror("malloc Task");
-             exit(1);
-         }
-         newTask->rdd = currRDD->child;
-         newTask->pnum = pnum;
-         newTask->metric = NULL;
-         queue_push(g_taskqueue, newTask);
-
-         pthread_cond_signal(&qfill);
-         pthread_mutex_unlock(&g_taskqueue->backlock);
-         */
 
         pthread_mutex_lock(&g_pool_lock);
         --g_submittingThreads;
@@ -470,7 +406,8 @@ void* metricsStart(void* arg) {
         if(!currT) continue;
 		
 		
-        TaskMetric* m = (TaskMetric*)currT;
+        //TaskMetric* m = (TaskMetric*)currT;
+        TaskMetric* m = currT->metric;
         if(!m){
 		printf("NULL Task m");
 		}
@@ -488,7 +425,6 @@ void thread_pool_init(int numthreads){
     g_threadCount = numthreads;
     //printf("init with threadcount %d\n", g_threadCount);
     g_submittingThreads = 0;
-    //printf("%d threads\n", numthreads);
     //init global list of all threads
     g_threads = malloc(sizeof(pthread_t)*numthreads);
     //init task queue
@@ -676,10 +612,8 @@ void list_append(List* l, void* e){
     if(!l->isList){
         pthread_mutex_lock(&l->guard);
     }
-    if (l->tail == NULL)
-    {
-        if (!l->isList)
-        {
+    if (l->tail == NULL){
+        if (!l->isList){
             pthread_mutex_unlock(&l->guard);
         }
         list_add_elem(l, e);
@@ -693,11 +627,6 @@ void list_append(List* l, void* e){
         exit(1);
     }
     curr->data = e;
-    /*
-    if(!l->isList){
-        pthread_mutex_lock(&l->guard);
-    }
-        */
     l->tail->next = curr;
     l->tail = curr;
     l->size++;
@@ -890,12 +819,6 @@ RDD *partitionBy(RDD *dep, Partitioner fn, int numpartitions, void *ctx)
       perror("parition malloc error");
       exit(1);
   }
-  /*
-  for(int i=0; i<rdd->numpartitions; i++){
-      rdd->pdep[i] = rdd->numpartitions;
-      //rdd->pdep[i] = 1;
-  }
-      */
     *(rdd->pdep)=rdd->dependencies[0]->numpartitions;
     //printf("t: %d, %d\n", *(rdd->pdep), rdd->trans);
 
