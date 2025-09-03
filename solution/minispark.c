@@ -1,3 +1,5 @@
+//patrickl, twei
+
 #include "minispark.h"
 #include <assert.h>
 
@@ -8,7 +10,6 @@ static queue* g_taskqueue = NULL;
 //static pthread_cond_t qempty = PTHREAD_COND_INITIALIZER;
 static pthread_cond_t qfill = PTHREAD_COND_INITIALIZER;
 static pthread_cond_t qempty = PTHREAD_COND_INITIALIZER;
-static pthread_mutex_t qmutex = PTHREAD_MUTEX_INITIALIZER;
 
 static pthread_mutex_t g_pool_lock = PTHREAD_MUTEX_INITIALIZER;
 int g_activeThreads;
@@ -205,7 +206,7 @@ void* threadstart(void *arg){
                 ListNode* temp;
                 ListIt it;
                 if(parentRDD->trans == FILE_BACKED){
-                    printf("parent is filebacked\n");
+                    //printf("parent is filebacked\n");
                     break;
                 }
                 listit_seek_to_start(parentP->data, &it);
@@ -409,7 +410,7 @@ void* metricsStart(void* arg) {
         //TaskMetric* m = (TaskMetric*)currT;
         TaskMetric* m = currT->metric;
         if(!m){
-		printf("NULL Task m");
+		    //printf("NULL Task m");
 		}
 		print_formatted_metric(m, g_metricsFile);
     }
@@ -466,7 +467,7 @@ void metrics_init() {
 
 void thread_pool_submit(Task* task){
     if(task == NULL){
-        printf("submitted null task\n");
+        //printf("submitted null task\n");
         return;
     }
     //printf("SUBMIT: trans = %d, pnum = %d\n", task->rdd->trans, task->pnum);
@@ -534,10 +535,7 @@ void thread_pool_destroy(){
 
     qnode* h = g_taskqueue->front;
     while(h){
-        qnode* curr = h;
         h=h->next;
-        //free(curr->t);
-        //free(curr);
     }
     //free(g_taskqueue);
     g_taskqueue = NULL;
@@ -557,7 +555,6 @@ void metrics_destroy() {
 
     qnode* c= g_metricQueue->front;
     while(c){
-        qnode* curr = c;
         //free(c->t); 
         //free(c);
         c = c->next;
@@ -985,7 +982,6 @@ void print(RDD *rdd, Printer p) {
   // print all the items in rdd
   // aka... `p(item)` for all items in rdd
   List* res = rdd->partitions;
-  //printf("print part size: %d\n", res->size);
   ListIt it1;
   listit_seek_to_start(res, &it1);
   ListNode* temp1;
@@ -994,9 +990,7 @@ void print(RDD *rdd, Printer p) {
         ListNode* temp2;
         ListIt it2;
         listit_seek_to_start(temp1->data, &it2);
-        //printf("print ele size: %d\n", ((List*)(temp1->data))->size);
         while((temp2 = listit_next(temp1->data, &it2))!=NULL){
-            //printf("elem\n");
             p(temp2->data);
         }
     }
