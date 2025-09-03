@@ -43,8 +43,8 @@ typedef enum {
 struct RDD {    
   Transform trans; // transform type, see enum
   void* fn; // transformation function
-  void* ctx; // used by minispark lib functions
-  List* partitions; // list of partitions
+  void* ctx; // used by minispark lib functions=====
+  List* partitions; // list of partitions=======
   
   RDD* dependencies[MAXDEPS];
   int numpartitions;
@@ -54,8 +54,8 @@ struct RDD {
   //size of these 2 should be nunpartitions
   //pthread_mutex_t* pdeplock;//NULL IF TRANSFORMATION IS NOT PARTITION! (b/c maybe pdep[i] > 1)
   pthread_mutex_t pdeplock;
-  int* pdep;
-  RDD* child;
+  int* pdep;//======
+  RDD* child;//=====
 };
 
 //TODO make list thread safe
