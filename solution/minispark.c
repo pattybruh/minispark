@@ -162,8 +162,6 @@ void* threadstart(void *arg){
         switch(currRDD->trans){
             case FILE_BACKED: {
                 //FILE_BACKED: they should be mapped 1:1
-                //no work todo except submit child's partitions
-                //printf("fuck you\n");
                 break;
             }
             case MAP: {
@@ -221,54 +219,6 @@ void* threadstart(void *arg){
                     }
                 }
                 break;
-/*
-                if(!filter -> data){
-					filter -> data = list_init(0);
-					List* outList = (List*)filter -> data; 
-					ListNode* parentNode = list_get(parentRDD->partitions, pnum);
-					if(!parentNode){
-						break;
-					}
-					if(parentRDD->trans == FILE_BACKED){
-						FILE* fp = (FILE*)parentNode->data;
-						char* line = NULL;
-						size_t size = 0;
-						while(1){
-							ssize_t n = getline(&line, &size, fp);
-							if(n < 0){
-								if(line){
-									free(line);
-								}
-								break;
-							}
-							int keep = fn(line, currRDD->ctx);
-							if(keep){
-								list_append(outList, line);
-							}else{
-								free(line);
-							}
-							line = NULL;
-							size = 0;
-						}
-					}else{
-						List* parentList = (List*)parentNode -> data;
-						ListIt it;
-						listit_seek_to_start(parentList, &it);
-						while(1){
-							ListNode* node = listit_next(parentList, &it);
-							if(node == NULL){
-								break;
-							}
-							void* val = node->data;
-							int keep = fn(val, currRDD->ctx);
-							if(keep){
-								list_append(outList, val);
-							}
-						}
-					}
-					break;
-				}
-                    */
 			}
             case JOIN: {
                 //TODO: avoid doubles, b/c both parent nodes could wake curr partition
@@ -299,7 +249,6 @@ void* threadstart(void *arg){
                 //TODO: only 1 parition is ever woken up
                 //need to find way to add all partitions of a PARITTIONBY to queue
                 //potential sol:
-                //
                 Partitioner func = (Partitioner)(currRDD->fn);
                 List* parentP = parentRDD->partitions;
                 ListIt it1;
@@ -311,13 +260,11 @@ void* threadstart(void *arg){
                     ListNode* temp2;
                     while((temp2 = listit_next(temp1->data, &it2)) != NULL){
                         int hashIdx = func(temp2->data, currRDD->numpartitions, currRDD->ctx);
-                        //printf("hashidx: %d, pnum: %d\n", hashIdx, pnum);
                         if(hashIdx == pnum){
                             list_append(list_get(currRDD->partitions, hashIdx)->data, temp2->data);
                         }
                     }
                 }
-
                 //list_free(parentP->data);
                 break;
             }
@@ -337,11 +284,9 @@ void* threadstart(void *arg){
         pthread_mutex_lock(&g_metricQueue->backlock);
         metric_push(g_metricQueue, metricTask);
         pthread_mutex_unlock(&g_metricQueue->backlock);
-        //currT->metric = NULL;
 
         //task submission
         if(currRDD->child == NULL){
-            //printf("rdd %d in partition %d has no child\n", currRDD->trans, pnum);
             pthread_mutex_lock(&g_pool_lock);
             --g_activeThreads;
             pthread_mutex_unlock(&g_pool_lock);
@@ -350,7 +295,6 @@ void* threadstart(void *arg){
         }
         //printf("currRDD = %p, currRDD->child = %p\n", (void *)currRDD, (void *)currRDD->child);
         pthread_mutex_lock(&currRDD->child->pdeplock);
-        //if((currRDD->child->trans == PARTITIONBY) && (--(currRDD->child->pdep[0]) != 0)){
         if(currRDD->child->trans == PARTITIONBY){
             if(--(currRDD->child->pdep[0]) != 0){
                 //printf("#p: %d, %d, pdep: %d\n", currRDD->numpartitions, currRDD->child->trans, currRDD->child->pdep[0]);
